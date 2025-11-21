@@ -1,0 +1,44 @@
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+
+prcopilot:
+  analysis:
+    # The maximum allowed diff size in characters; above this you can reject or truncate
+    max-diff-chars: ${PRCOPILOT_ANALYSIS_MAX_DIFF_CHARS:50000}
+    default-language: ${PRCOPILOT_ANALYSIS_DEFAULT_LANGUAGE:en}
+    # The default "style" for titles/descriptions
+    default-style: ${PRCOPILOT_ANALYSIS_DEFAULT_STYLE:conventional-commits}
+    # Include raw model output in the response (useful for debugging)
+    include-raw-model-output: ${PRCOPILOT_ANALYSIS_INCLUDE_RAW_MODEL_OUTPUT:false}
+
+  logging:
+    # Whether to log prompts and/or responses
+    log-prompts: ${LOG_PROMPTS:false}
+    log-responses: ${LOG_RESPONSES:false}
+
+spring:
+  ai:
+    openai:
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com/}
+      chat:
+        options:
+          model: ${OPENAI_MODEL:gpt-4o}
+      api-key: ${OPENAI_API_KEY}
+  application:
+    name: ai-pr-copilot
+
+ai:
+  temperature: ${AI_TEMPERATURE:0.1}
+  max-tokens: ${AI_MAX_TOKENS:1024}
+  timeout-millis: ${AI_TIMEOUT_MILLS:30000}
