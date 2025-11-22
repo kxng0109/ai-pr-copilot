@@ -27,7 +27,7 @@ public class DiffAnalysisController {
      * @param request the request containing the diff content, language, style, max summary length, and request ID, must not be null
      * @return the response containing the analysis title, summary, details, risks, suggested tests, touched files, analysis notes, metadata, request ID, and raw model output, never
      *  null
-     * @throws DiffTooLargeException if the diff content exceeds the maximum allowed size
+     * @throws io.github.kxng0109.aiprcopilot.error.DiffTooLargeException if the diff content exceeds the maximum allowed size
      */
     @PostMapping("/analyze-diff")
     public ResponseEntity<AnalyzeDiffResponse> analyzeDiff(@Valid @RequestBody AnalyzeDiffRequest request) {

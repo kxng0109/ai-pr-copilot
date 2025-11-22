@@ -1,10 +1,9 @@
 package io.github.kxng0109.aiprcopilot.service;
 
-import io.github.kxng0109.aiprcopilot.config.AiGenerationProperties;
 import io.github.kxng0109.aiprcopilot.config.PrCopilotAnalysisProperties;
+import io.github.kxng0109.aiprcopilot.config.api.dto.AiCallMetadata;
 import io.github.kxng0109.aiprcopilot.config.api.dto.AnalyzeDiffRequest;
 import io.github.kxng0109.aiprcopilot.config.api.dto.AnalyzeDiffResponse;
-import io.github.kxng0109.aiprcopilot.config.api.dto.AiCallMetadata;
 import io.github.kxng0109.aiprcopilot.error.DiffTooLargeException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
@@ -26,10 +25,10 @@ public class DiffAnalysisService {
     private final String SYSTEM_PROMPT = """
             You are a senior software engineer and expert code reviewer.
             You will receive a unified Git diff and some hints:
-    
+            
             - language: {language}
             - style: {style}
-    
+            
             Your job is to analyze the diff and produce a JSON object with these fields:
             - title (string)
             - summary (string)
@@ -41,7 +40,7 @@ public class DiffAnalysisService {
             - metadata (object: modelName, modelLatencyMs, tokensUsed)
             - requestId (string or null)
             - rawModelOutput (string or null)
-    
+            
             The JSON must be valid and contain only these fields.
             Be concise and do not invent information not suggested by the diff.
             """;
@@ -54,7 +53,9 @@ public class DiffAnalysisService {
         String diff = request.diff();
         if (diff.length() > analysisProperties.getMaxDiffChars()) {
             throw new DiffTooLargeException(
-                    String.format("Diff exceeded maximum allowed size of %d characters", analysisProperties.getMaxDiffChars())
+                    String.format("Diff exceeded maximum allowed size of %d characters",
+                                  analysisProperties.getMaxDiffChars()
+                    )
             );
         }
 
@@ -89,10 +90,10 @@ public class DiffAnalysisService {
         userContent.append("Analyze the following Git diff.\n");
         userContent.append("language: ").append(language).append("\n");
         userContent.append("style: ").append(style).append("\n");
-        if(maxSummaryLength != null) {
+        if (maxSummaryLength != null) {
             userContent.append("maxSummaryLength: ").append(maxSummaryLength).append("\n");
         }
-        if(requestId != null && !requestId.isBlank()) {
+        if (requestId != null && !requestId.isBlank()) {
             userContent.append("requestId: ").append(requestId).append("\n");
         }
         userContent.append("Diff: ```").append(diff).append("\n```");
@@ -125,7 +126,7 @@ public class DiffAnalysisService {
                                                 .build();
 
         return AnalyzeDiffResponse.builder()
-                .metadata(metadata)
-                .build();
+                                  .metadata(metadata)
+                                  .build();
     }
 }
