@@ -33,7 +33,7 @@ public class DiffAnalysisService {
             - language: {language}
             - style: {style}
             
-            Your job is to analyze the diff and produce a JSON object with these fields:
+            Your job is to analyze the diff and produce a JSON object with exactly these fields:
             - title (string)
             - summary (string)
             - details (string)
@@ -47,6 +47,7 @@ public class DiffAnalysisService {
             
             The JSON must be valid and contain only these fields.
             Be concise and do not invent information not suggested by the diff.
+            Do not include extraneous text, markdown fences, or explanation.
             """;
     private final PrCopilotAnalysisProperties analysisProperties;
     private final ChatClient chatClient;
@@ -122,6 +123,7 @@ public class DiffAnalysisService {
     }
 
     private AnalyzeDiffResponse mapToAnalyzeDiffResponse(ChatResponse response, long responseTime, String diff) {
+        System.out.println(response);
         String model = response.getMetadata().getModel();
         int tokensUsed = response.getMetadata().getUsage().getTotalTokens();
         AiCallMetadata metadata = AiCallMetadata.builder()

@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -15,17 +16,23 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * A class for handling global exceptions in a Spring Boot application.
+ * Centralized exception handler for managing application-specific and generic exceptions.
+ * <p>
+ * Provides custom error responses for exceptions while ensuring appropriate HTTP status codes.
+ *
+ * <p>Automatically invoked by the Spring framework for any unhandled exceptions thrown within
+ * {@code @RestController} components.
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     /**
-     * Handles exceptions when the diff content exceeds the maximum allowed size.
+     * Handles {@code DiffTooLargeException} by constructing an {@code ErrorResponse}
+     * and returning it wrapped in a {@code ResponseEntity} with an HTTP 413 (Payload Too Large) status code.
      *
-     * @param ex       the exception that occurred, must not be null
-     * @param request  the HTTP request that caused the exception, must not be null
-     * @return a response entity containing error information, never {@code null}
+     * @param ex      the exception that occurred, must not be {@code null}
+     * @param request the HTTP request that caused the exception, must not be {@code null}
+     * @return a response entity containing error details, never {@code null}
      */
     @ExceptionHandler(DiffTooLargeException.class)
     public ResponseEntity<ErrorResponse> handleDiffTooLargeException(
@@ -45,10 +52,11 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Handles exceptions when a resource is not found.
+     * Handles {@code NoResourceFoundException} by constructing an {@code ErrorResponse} and
+     * returning it wrapped in a {@code ResponseEntity} with an HTTP 404 status code.
      *
-     * @param ex      the exception that occurred, must not be null
-     * @param request the HTTP request that caused the exception, must not be null
+     * @param ex      the exception that occurred, must not be {@code null}
+     * @param request the HTTP request that caused the exception, must not be {@code null}
      * @return a response entity containing error information, never {@code null}
      */
     @ExceptionHandler(NoResourceFoundException.class)
@@ -70,10 +78,11 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Handles exceptions when method arguments are not valid.
+     * Handles {@code MethodArgumentNotValidException} by constructing an {@code ErrorResponse} containing
+     * validation error details and returning it in a {@code ResponseEntity} with an HTTP 400 status code.
      *
-     * @param ex       the exception that occurred, must not be null
-     * @param request  the HTTP request that caused the exception, must not be null
+     * @param ex      the exception that occurred, must not be {@code null}
+     * @param request the HTTP request that caused the exception, must not be {@code null}
      * @return a response entity containing error information, never {@code null}
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -102,10 +111,38 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Handles exceptions related to invalid method arguments.
+     * Handles {@code HttpRequestMethodNotSupportedException} by generating a response entity
+     * containing error details and an HTTP 405 status code.
      *
-     * @param ex       the exception that occurred, must not be null
-     * @param request  the HTTP request that caused the exception, must not be null
+     * @param ex      the exception that occurred, must not be {@code null}
+     * @param request the HTTP request that caused the exception, must not be {@code null}
+     * @return a response entity containing error information, never {@code null}
+     */
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleHttpRequestMethodNotSupportedException(
+            HttpRequestMethodNotSupportedException ex,
+            HttpServletRequest request
+    ) {
+        HttpStatus status = HttpStatus.METHOD_NOT_ALLOWED;
+
+        ErrorResponse errorResponse = ErrorResponse.builder()
+                                                   .timestamp(OffsetDateTime.now())
+                                                   .statusCode(status.value())
+                                                   .error(status.getReasonPhrase())
+                                                   .message(ex.getMessage())
+                                                   .path(request.getRequestURI())
+                                                   .build();
+
+        return ResponseEntity.status(status).body(errorResponse);
+    }
+
+    /**
+     * Handles general exceptions by constructing an {@code ErrorResponse} and returning it
+     * wrapped in a {@code ResponseEntity} with an HTTP 500 status code.
+     *
+     * @param ex      the exception that occurred, must not be {@code null}
+     * @param request the HTTP request that caused the exception, must not be {@code null}
      * @return a response entity containing error information, never {@code null}
      */
     @ExceptionHandler(Exception.class)
