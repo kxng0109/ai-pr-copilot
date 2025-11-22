@@ -67,6 +67,83 @@ public class DiffAnalysisServiceTest {
                                                        .diff("a diff sha")
                                                        .requestId("req-1")
                                                        .build();
+
+        ChatResponseMetadata chatResponseMetadata = mockChatResponse();
+
+        AnalyzeDiffResponse response = diffAnalysisService.analyzeDiff(request);
+
+        assertNotNull(response);
+        assertEquals(chatResponseMetadata.getModel(), response.metadata().modelName());
+        assertEquals(chatResponseMetadata.getUsage().getTotalTokens(), response.metadata().tokensUsed());
+
+        ArgumentCaptor<Prompt> promptCaptor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatClient).prompt(promptCaptor.capture());
+        Prompt capturedPrompt = promptCaptor.getValue();
+
+        assertThat(capturedPrompt.getInstructions().toString()).contains("language: en");
+        assertThat(capturedPrompt.getInstructions().toString()).contains("style: conventional-commits");
+    }
+
+    @Test
+    public void analyzeDiff_shouldPopulateTouchedFiles_fromDiffHeaders() {
+        String diff = """
+                diff --git a/src/main/java/io/github/kxng0109/aiprcopilot/config/api/dto/AnalyzeDiffRequest.java b/src/main/java/io/github/kxng0109/aiprcopilot/config/api/dto/AnalyzeDiffRequest.java
+                index e508847..c42c48f 100644
+                --- a/src/main/java/io/github/kxng0109/aiprcopilot/config/api/dto/AnalyzeDiffRequest.java
+                +++ b/src/main/java/io/github/kxng0109/aiprcopilot/config/api/dto/AnalyzeDiffRequest.java
+                @@ -14,6 +14,7 @@ import lombok.Builder;
+                  * @param requestId a unique identifier for the request, may be {@code null}
+                  */
+                 @Builder
+                +test
+                diff --git a/src/main/java/io/github/kxng0109/aiprcopilot/service/DiffAnalysisService.java b/src/main/java/io/github/kxng0109/aiprcopilot/service/DiffAnalysisService.java
+                index 9070c4c..818e1a7 100644
+                --- a/src/main/java/io/github/kxng0109/aiprcopilot/service/DiffAnalysisService.java
+                +++ b/src/main/java/io/github/kxng0109/aiprcopilot/service/DiffAnalysisService.java
+                @@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
+                
+                 import java.util.Map;
+                +import java.util.regex.Pattern;
+                
+                 @Service
+                 @RequiredArgsConstructor
+                @@ -45,6 +46,8 @@ public class DiffAnalysisService {
+                             Be concise and do not invent information not suggested by the diff.
+                             ""\";
+                
+                +    private static final Pattern DIFF_GIT_LINE_PATTERN = Pattern.compile("^diff --git a/(.+?) b/(.+)$");
+                +
+                     private final PrCopilotAnalysisProperties analysisProperties;
+                """;
+
+        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+                                                       .diff(diff)
+                                                       .requestId("req-1")
+                                                       .build();
+
+        mockChatResponse();
+
+        AnalyzeDiffResponse response = diffAnalysisService.analyzeDiff(request);
+
+        assertThat(response.touchedFiles())
+                .containsExactly(
+                        "src/main/java/io/github/kxng0109/aiprcopilot/config/api/dto/AnalyzeDiffRequest.java",
+                        "src/main/java/io/github/kxng0109/aiprcopilot/service/DiffAnalysisService.java"
+                );
+    }
+
+    @Test
+    public void analyzeDiff_shouldThrowDoffTooLargeException_whenDiffExceedsMaxChars() {
+        String largeDiff = "x".repeat(prCopilotAnalysisProperties.getMaxDiffChars() + 1);
+        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+                                                       .diff(largeDiff)
+                                                       .requestId("req-1")
+                                                       .build();
+
+        assertThrows(DiffTooLargeException.class, () -> diffAnalysisService.analyzeDiff(request));
+    }
+
+    private ChatResponseMetadata mockChatResponse() {
         Generation generation = new Generation(
                 new AssistantMessage("Some details or message")
         );
@@ -109,28 +186,6 @@ public class DiffAnalysisServiceTest {
         when(requestSpec.call()).thenReturn(callResponseSpec);
         when(callResponseSpec.chatResponse()).thenReturn(chatResponse);
 
-        AnalyzeDiffResponse response = diffAnalysisService.analyzeDiff(request);
-
-        assertNotNull(response);
-        assertEquals(chatResponseMetadata.getModel(), response.metadata().modelName());
-        assertEquals(chatResponseMetadata.getUsage().getTotalTokens(), response.metadata().tokensUsed());
-
-        ArgumentCaptor<Prompt> promptCaptor = ArgumentCaptor.forClass(Prompt.class);
-        verify(chatClient).prompt(promptCaptor.capture());
-        Prompt capturedPrompt = promptCaptor.getValue();
-
-        assertThat(capturedPrompt.getInstructions().toString()).contains("language: en");
-        assertThat(capturedPrompt.getInstructions().toString()).contains("style: conventional-commits");
-    }
-
-    @Test
-    public void analyzeDiff_shouldThrowDoffTooLargeException_whenDiffExceedsMaxChars() {
-        String largeDiff = "x".repeat(prCopilotAnalysisProperties.getMaxDiffChars() + 1);
-        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
-                                                       .diff(largeDiff)
-                                                       .requestId("req-1")
-                                                       .build();
-
-        assertThrows(DiffTooLargeException.class, () -> diffAnalysisService.analyzeDiff(request));
+        return chatResponseMetadata;
     }
 }

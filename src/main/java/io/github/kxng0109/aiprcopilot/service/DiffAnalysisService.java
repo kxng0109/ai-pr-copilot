@@ -15,13 +15,17 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.chat.prompt.SystemPromptTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
 public class DiffAnalysisService {
 
+    private static final Pattern DIFF_GIT_LINE_PATTERN = Pattern.compile("^diff --git a/(.+?) b/(.+)$");
     private final String SYSTEM_PROMPT = """
             You are a senior software engineer and expert code reviewer.
             You will receive a unified Git diff and some hints:
@@ -44,7 +48,6 @@ public class DiffAnalysisService {
             The JSON must be valid and contain only these fields.
             Be concise and do not invent information not suggested by the diff.
             """;
-
     private final PrCopilotAnalysisProperties analysisProperties;
     private final ChatClient chatClient;
     private final ChatOptions chatOptions;
@@ -73,7 +76,7 @@ public class DiffAnalysisService {
 
         long latencyMs = end - start;
 
-        return mapToAnalyzeDiffResponse(aiResponse, latencyMs);
+        return mapToAnalyzeDiffResponse(aiResponse, latencyMs, diff);
     }
 
     private Prompt buildPrompt(
@@ -115,10 +118,10 @@ public class DiffAnalysisService {
     }
 
     private String useDefaultIfBlank(String givenValue, String defaultValue) {
-        return (givenValue == null || givenValue.trim().isEmpty()) ? defaultValue : givenValue;
+        return (givenValue == null || givenValue.trim().isEmpty() || givenValue.isBlank()) ? defaultValue : givenValue;
     }
 
-    private AnalyzeDiffResponse mapToAnalyzeDiffResponse(ChatResponse response, long responseTime) {
+    private AnalyzeDiffResponse mapToAnalyzeDiffResponse(ChatResponse response, long responseTime, String diff) {
         String model = response.getMetadata().getModel();
         int tokensUsed = response.getMetadata().getUsage().getTotalTokens();
         AiCallMetadata metadata = AiCallMetadata.builder()
@@ -129,6 +132,31 @@ public class DiffAnalysisService {
 
         return AnalyzeDiffResponse.builder()
                                   .metadata(metadata)
+                                  .touchedFiles(extractTouchedFilesFromDiff(diff))
                                   .build();
+    }
+
+    /**
+     * Extracts the list of files touched from the provided Git diff.
+     *
+     * @param diff the unified Git diff content, may be {@code null} or blank
+     * @return an immutable list of file paths extracted from the diff in the order they appear, never {@code null}; returns an empty list if {@code diff} is {@code null} or blank
+     *
+     */
+    private List<String> extractTouchedFilesFromDiff(String diff) {
+        if (diff == null || diff.trim().isEmpty() || diff.isBlank()) return List.of();
+
+        LinkedHashSet<String> files = new LinkedHashSet<>();
+
+        String[] lines = diff.split("\\R");
+        for (String line : lines) {
+            Matcher matcher = DIFF_GIT_LINE_PATTERN.matcher(line);
+            if (matcher.matches()) {
+                String newPath = matcher.group(2);
+                files.add(newPath);
+            }
+        }
+
+        return List.copyOf(files);
     }
 }
