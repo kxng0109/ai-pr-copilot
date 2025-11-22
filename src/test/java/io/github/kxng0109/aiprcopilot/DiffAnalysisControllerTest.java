@@ -18,8 +18,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -77,7 +76,7 @@ public class DiffAnalysisControllerTest {
     }
 
     @Test
-    public void analyzeDiff_shouldReturn400BadRequest_whenDIffIsBlank() throws Exception {
+    public void analyzeDiff_shouldThrow400BadRequest_whenDIffIsBlank() throws Exception {
         AnalyzeDiffRequest invalidRequest = AnalyzeDiffRequest.builder()
                                                               .diff("  ")
                                                               .language("en")
@@ -91,11 +90,14 @@ public class DiffAnalysisControllerTest {
                                 .content(objectMapper.writeValueAsString(invalidRequest)))
                .andExpect(status().isBadRequest())
                .andExpect(jsonPath("$.statusCode").value(400))
-               .andExpect(jsonPath("$.message").value("{diff=Diff must not be blank}"));
+               .andExpect(jsonPath("$.message").value("{diff=Diff must not be blank}"))
+               .andExpect(jsonPath("$.path").value("/api/v1/analyze-diff"));
+
+        verify(diffAnalysisService, never()).analyzeDiff(any(AnalyzeDiffRequest.class));
     }
 
     @Test
-    public void analyzeDiff_shouldReturn413DiffTooLargeException_whenDiffIsTooLarge() throws Exception {
+    public void analyzeDiff_shouldThrow413DiffTooLargeException_whenDiffIsTooLarge() throws Exception {
         int maxDiffChars = 1024;
         String diff = "x".repeat(maxDiffChars + 1);
 
@@ -113,7 +115,8 @@ public class DiffAnalysisControllerTest {
                                 .content(objectMapper.writeValueAsString(request)))
                .andExpect(status().isPayloadTooLarge())
                .andExpect(jsonPath("$.statusCode").value(413))
-               .andExpect(jsonPath("$.message").value("Diff exceeded maximum allowed size"));
+               .andExpect(jsonPath("$.message").value("Diff exceeded maximum allowed size"))
+               .andExpect(jsonPath("$.path").value("/api/v1/analyze-diff"));
 
         verify(diffAnalysisService).analyzeDiff(any(AnalyzeDiffRequest.class));
     }
@@ -123,6 +126,31 @@ public class DiffAnalysisControllerTest {
         mockMvc.perform(post("/api/v1/does-not-exist")
                                 .contentType(MediaType.APPLICATION_JSON))
                .andExpect(status().isNotFound())
-               .andExpect(jsonPath("$.statusCode").value(404));
+               .andExpect(jsonPath("$.statusCode").value(404))
+               .andExpect(jsonPath("$.path").value("/api/v1/does-not-exist"));
+
+        verify(diffAnalysisService, never()).analyzeDiff(any(AnalyzeDiffRequest.class));
+    }
+
+    @Test
+    public void analyzeDiff_shouldThrow500RuntimeException_whenErrorIsGeneric() throws Exception {
+        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+                                                       .diff("x")
+                                                       .maxSummaryLength(1024)
+                                                       .requestId("req-1")
+                                                       .build();
+
+        when(diffAnalysisService.analyzeDiff(any(AnalyzeDiffRequest.class)))
+                .thenThrow(new RuntimeException("boommmmmm!!!"));
+
+        mockMvc.perform(post("/api/v1/analyze-diff")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(objectMapper.writeValueAsString(request)))
+               .andExpect(status().isInternalServerError())
+               .andExpect(jsonPath("$.statusCode").value(500))
+               .andExpect(jsonPath("$.message").value("boommmmmm!!!"))
+               .andExpect(jsonPath("$.path").value("/api/v1/analyze-diff"));
+
+        verify(diffAnalysisService).analyzeDiff(any(AnalyzeDiffRequest.class));
     }
 }
