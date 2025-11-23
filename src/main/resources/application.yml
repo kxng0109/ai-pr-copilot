@@ -52,3 +52,8 @@ ai:
   temperature: ${AI_TEMPERATURE:0.1}
   max-tokens: ${AI_MAX_TOKENS:1024}
   timeout-millis: ${AI_TIMEOUT_MILLIS:30000}
+
+logging:
+  level:
+    root: ${LOG_LEVEL_ROOT:info}
+    io.github.kxng0109.aiprcopilot: ${LOG_LEVEL_KXNG:info}

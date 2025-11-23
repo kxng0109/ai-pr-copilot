@@ -21,6 +21,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.chat.prompt.SystemPromptTemplate;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -48,6 +49,7 @@ public class DiffAnalysisService {
             
             ### OUTPUT FORMAT
             You must output a single, valid JSON object.
+            Do not send an invalid JSON for any reason.
             The JSON must strictly adhere to this schema:
             
             \\{
@@ -241,10 +243,9 @@ public class DiffAnalysisService {
 
     private String sanitizeModelOutput(String value) {
         if (value == null || value.isBlank()) return "";
-        return value
-                .replaceAll("(?s)^```[a-zA-Z0-9]*\\s*", "")
-                .replaceAll("(?s)\\s*```$", "")
-                .trim();
+        value = value.replaceFirst("(?s)^```(?:json)?\\s*\\n?", "");
+        value = value.replaceFirst("(?s)\\n?```$", "");
+        return value.trim();
     }
 
     /**
