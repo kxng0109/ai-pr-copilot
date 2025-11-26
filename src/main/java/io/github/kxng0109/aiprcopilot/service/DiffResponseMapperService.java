@@ -57,13 +57,13 @@ class DiffResponseMapperService {
             String provider
     ) {
         String modelOutput = extractModelOutputText(response);
-        log.debug("AI model raw output: {}", modelOutput); //Remove
+        log.debug("AI model raw output: {}", modelOutput);
         String cleanedModelOutput = sanitizeModelOutput(modelOutput);
-        log.debug("AI model cleaned output: {}", cleanedModelOutput); //Remove
+        log.debug("AI model cleaned output: {}", cleanedModelOutput);
 
         try {
             ModelAnalyzeDiffResult aiResult = objectMapper.readValue(cleanedModelOutput, ModelAnalyzeDiffResult.class);
-            log.debug("AI model analysis result: {}", aiResult); //Remove
+            log.debug("AI model analysis result: {}", aiResult);
 
             if (aiResult == null) {
                 throw new ModelOutputParseException("Parsed model output is null. Expected non-null, valid JSON DTO.");

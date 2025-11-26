@@ -80,7 +80,14 @@ public class DiffAnalysisService {
         try {
             log.debug("Attempting to use primary provider: {}", multiAiConfigurationProperties.getProvider());
 
-            return callAiAndBuildResponse(request, diff, prompt, primaryChatClient, primaryChatOptions);
+            return callAiAndBuildResponse(
+                    request,
+                    diff,
+                    prompt,
+                    primaryChatClient,
+                    primaryChatOptions,
+                    multiAiConfigurationProperties.getProvider().getValue()
+            );
         } catch (ModelOutputParseException e) {
             log.warn("Model output could not be parsed for requestId '{}': {}", request.requestId(), e.getMessage());
             throw e;
@@ -96,7 +103,14 @@ public class DiffAnalysisService {
                               multiAiConfigurationProperties.getFallbackProvider()
                     );
 
-                    return callAiAndBuildResponse(request, diff, prompt, fallbackChatClient, fallbackChatOptions);
+                    return callAiAndBuildResponse(
+                            request,
+                            diff,
+                            prompt,
+                            fallbackChatClient,
+                            fallbackChatOptions,
+                            multiAiConfigurationProperties.getFallbackProvider().getValue()
+                    );
                 } catch (Exception fallBackException) {
                     log.error(
                             "Unexpected error in diff analysis for requestId '{}' while using fallback provider: {}",
@@ -127,17 +141,24 @@ public class DiffAnalysisService {
      * @param request             the request containing metadata and context for the analysis, must not be {@code null}
      * @param diff                the code diff to be analyzed, must not be {@code null} or empty
      * @param prompt              the AI model prompt used for guiding the analysis, must not be {@code null} or blank
-     * @param fallbackChatClient  the fallback chat client to use for the AI call, must not be {@code null}
-     * @param fallbackChatOptions the options to configure the fallback chat client, must not be {@code null}
+     * @param chatClient  the fallback chat client to use for the AI call, must not be {@code null}
+     * @param chatOptions the options to configure the fallback chat client, must not be {@code null}
      * @return the response containing the AI analysis results, never {@code null}
      * @throws IllegalArgumentException if any required parameter is {@code null} or invalid
      */
-    private AnalyzeDiffResponse callAiAndBuildResponse(AnalyzeDiffRequest request, String diff, Prompt prompt, ChatClient fallbackChatClient, ChatOptions fallbackChatOptions) {
+    private AnalyzeDiffResponse callAiAndBuildResponse(
+            AnalyzeDiffRequest request,
+            String diff,
+            Prompt prompt,
+            ChatClient chatClient,
+            ChatOptions chatOptions,
+            String providerName
+    ) {
         long start = System.currentTimeMillis();
         ChatResponse aiResponse = aiChatService.callAiModel(
                 prompt,
-                fallbackChatClient,
-                fallbackChatOptions
+                chatClient,
+                chatOptions
         );
         long end = System.currentTimeMillis();
         long latencyMs = end - start;
@@ -147,7 +168,7 @@ public class DiffAnalysisService {
                 latencyMs,
                 diff,
                 request.requestId(),
-                multiAiConfigurationProperties.getProvider().getValue()
+                providerName
         );
     }
 
