@@ -1,10 +1,9 @@
-package io.github.kxng0109.aiprcopilot;
+package io.github.kxng0109.aiprcopilot.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.kxng0109.aiprcopilot.config.api.dto.AiCallMetadata;
-import io.github.kxng0109.aiprcopilot.config.api.dto.AnalyzeDiffRequest;
-import io.github.kxng0109.aiprcopilot.config.api.dto.AnalyzeDiffResponse;
-import io.github.kxng0109.aiprcopilot.controller.DiffAnalysisController;
+import io.github.kxng0109.aiprcopilot.api.dto.AiCallMetadata;
+import io.github.kxng0109.aiprcopilot.api.dto.AnalyzeDiffRequest;
+import io.github.kxng0109.aiprcopilot.api.dto.AnalyzeDiffResponse;
 import io.github.kxng0109.aiprcopilot.error.DiffTooLargeException;
 import io.github.kxng0109.aiprcopilot.service.DiffAnalysisService;
 import org.junit.jupiter.api.Test;
@@ -97,6 +96,44 @@ public class DiffAnalysisControllerTest {
     }
 
     @Test
+    void analyzeDiff_shouldReturn400BadRequest_whenDiffIsMissing() throws Exception {
+        String invalidJson = """
+            {
+              "language": "en",
+              "style": "conventional-commits"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/analyze-diff")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(invalidJson))
+               .andExpect(status().isBadRequest());
+
+        verify(diffAnalysisService, never()).analyzeDiff(any(AnalyzeDiffRequest.class));
+    }
+
+    @Test
+    void analyzeDiff_shouldReturn400MethodArgumentNotValidException_whenRequestBodyIsMissing() throws Exception {
+        mockMvc.perform(post("/api/v1/analyze-diff")
+                                .contentType(MediaType.APPLICATION_JSON))
+               .andExpect(status().isBadRequest())
+               .andExpect(jsonPath("$.statusCode").value(400))
+               .andExpect(jsonPath("$.message").value("Request body is missing. JSON object required."));
+
+        verify(diffAnalysisService, never()).analyzeDiff(any(AnalyzeDiffRequest.class));
+    }
+
+    @Test
+    void analyzeDiff_shouldReturn405MethodNotAllowed_whenUsingWrongHttpMethod() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                                .get("/api/v1/analyze-diff"))
+               .andExpect(status().isMethodNotAllowed())
+               .andExpect(jsonPath("$.statusCode").value(405));
+
+        verify(diffAnalysisService, never()).analyzeDiff(any(AnalyzeDiffRequest.class));
+    }
+
+    @Test
     public void analyzeDiff_shouldThrow413DiffTooLargeException_whenDiffIsTooLarge() throws Exception {
         int maxDiffChars = 1024;
         String diff = "x".repeat(maxDiffChars + 1);
@@ -122,7 +159,7 @@ public class DiffAnalysisControllerTest {
     }
 
     @Test
-    public void shouldThrowNoResourceFoundException_whenEndpointDoesNotExist() throws Exception {
+    public void shouldThrow404NoResourceFoundException_whenEndpointDoesNotExist() throws Exception {
         mockMvc.perform(post("/api/v1/does-not-exist")
                                 .contentType(MediaType.APPLICATION_JSON))
                .andExpect(status().isNotFound())

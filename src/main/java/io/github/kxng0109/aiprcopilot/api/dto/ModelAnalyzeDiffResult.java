@@ -1,4 +1,4 @@
-package io.github.kxng0109.aiprcopilot.config.api.dto;
+package io.github.kxng0109.aiprcopilot.api.dto;
 
 import java.util.List;
 

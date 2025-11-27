@@ -53,7 +53,7 @@ class AppStartupCheck {
 
         if (multiAiConfigurationProperties.isAutoFallback()) {
             if (multiAiConfigurationProperties.getFallbackProvider() == null) {
-                String errorMessage = "Auto-fallback is enabled but provider is not set/configured. Either set fallback provider or disable auto-fallback. \nCheck .env.example for more info";
+                String errorMessage = "Auto-fallback is enabled but fallback provider is not set/configured. Either set fallback provider or disable auto-fallback. \nCheck .env.example for more info";
                 log.error(errorMessage);
 
                 throw new RuntimeException(errorMessage);

@@ -4,9 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.kxng0109.aiprcopilot.config.PrCopilotAnalysisProperties;
 import io.github.kxng0109.aiprcopilot.config.PrCopilotLoggingProperties;
-import io.github.kxng0109.aiprcopilot.config.api.dto.AiCallMetadata;
-import io.github.kxng0109.aiprcopilot.config.api.dto.AnalyzeDiffResponse;
-import io.github.kxng0109.aiprcopilot.config.api.dto.ModelAnalyzeDiffResult;
+import io.github.kxng0109.aiprcopilot.api.dto.AiCallMetadata;
+import io.github.kxng0109.aiprcopilot.api.dto.AnalyzeDiffResponse;
+import io.github.kxng0109.aiprcopilot.api.dto.ModelAnalyzeDiffResult;
 import io.github.kxng0109.aiprcopilot.error.ModelOutputParseException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -78,7 +78,7 @@ class DiffResponseMapperService {
             if (loggingProperties.isLogResponses()) log.info(aiResult.toString());
 
             String model = response.getMetadata().getModel();
-            Integer tokensUsed = response.getMetadata().getUsage().getTotalTokens() != null
+            Integer tokensUsed = (response.getMetadata().getUsage() != null && response.getMetadata().getUsage().getTotalTokens() != null)
                     ? response.getMetadata().getUsage().getTotalTokens()
                     : null;
 
@@ -114,7 +114,10 @@ class DiffResponseMapperService {
             log.warn("JSON parsing failed for model output: {}", e.getOriginalMessage());
             throw new ModelOutputParseException("Model returned invalid JSON output. " +
                                                         "Error details: " + e.getOriginalMessage());
-        } catch (Exception e) {
+        } catch (ModelOutputParseException e) {
+            throw e;
+        }
+        catch (Exception e) {
             throw new RuntimeException("Unexpected error mapping AI output", e);
         }
     }

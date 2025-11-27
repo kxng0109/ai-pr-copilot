@@ -1,0 +1,55 @@
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+
+prcopilot:
+  analysis:
+    max-diff-chars: 50000
+    default-language: en
+    default-style: conventional-commits
+    include-raw-model-output: false
+
+  logging:
+    log-prompts: false
+    log-responses: false
+
+  ai:
+    provider: openai
+    fallback-provider:
+    auto-fallback: false
+    temperature: 0.1
+    max-tokens: 1024
+    timeout-millis: 30000
+
+  prompts:
+    system-prompt: classpath:prompts/system-prompt.txt
+
+spring:
+  ai:
+    openai:
+      api-key: test-key-for-testing
+      base-url: http://localhost:8080/mock
+      chat:
+        options:
+          model: gpt-4o-mini
+
+    anthropic:
+      api-key: test-ant-key
+      base-url: http://localhost:8080/mock
+
+    vertex:
+      ai:
+        gemini:
+          project-id: test-project
+          location: us-central1
+
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        options:
+          model: qwen3:4b
+
+  application:
+    name: ai-pr-copilot-test

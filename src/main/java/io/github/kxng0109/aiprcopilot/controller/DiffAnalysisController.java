@@ -1,7 +1,7 @@
 package io.github.kxng0109.aiprcopilot.controller;
 
-import io.github.kxng0109.aiprcopilot.config.api.dto.AnalyzeDiffRequest;
-import io.github.kxng0109.aiprcopilot.config.api.dto.AnalyzeDiffResponse;
+import io.github.kxng0109.aiprcopilot.api.dto.AnalyzeDiffRequest;
+import io.github.kxng0109.aiprcopilot.api.dto.AnalyzeDiffResponse;
 import io.github.kxng0109.aiprcopilot.service.DiffAnalysisService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;

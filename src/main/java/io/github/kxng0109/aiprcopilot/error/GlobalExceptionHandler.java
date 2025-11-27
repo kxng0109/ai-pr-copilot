@@ -1,6 +1,6 @@
 package io.github.kxng0109.aiprcopilot.error;
 
-import io.github.kxng0109.aiprcopilot.config.api.dto.ErrorResponse;
+import io.github.kxng0109.aiprcopilot.api.dto.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
