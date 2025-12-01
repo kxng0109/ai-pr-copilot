@@ -1,6 +1,5 @@
 package io.github.kxng0109.aiprcopilot.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import io.github.kxng0109.aiprcopilot.api.dto.AnalyzeDiffRequest;
 import io.github.kxng0109.aiprcopilot.api.dto.AnalyzeDiffResponse;
 import io.github.kxng0109.aiprcopilot.config.AiProvider;
@@ -85,7 +84,7 @@ public class DiffAnalysisServiceTest {
     }
 
     @Test
-    public void analyzeDiff_shouldUseDefaults_whenLanguageAndStyleAreNull() throws JsonProcessingException {
+    public void analyzeDiff_shouldUseDefaults_whenLanguageAndStyleAreNull() {
         String diff = "a diff sha";
         AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
                                                        .diff(diff)

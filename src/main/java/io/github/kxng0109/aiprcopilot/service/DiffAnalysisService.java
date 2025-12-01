@@ -148,6 +148,14 @@ public class DiffAnalysisService {
                                 multiAiConfigurationProperties.getFallbackProvider().getValue(),
                                 fallBackException
                         );
+
+                        throw new RuntimeException(
+                                String.format(
+                                        "Could not process diff analysis due to internal error across the two providers. %s. %s",
+                                        primaryException.getMessage(),
+                                        fallBackException.getMessage()
+                                ), fallBackException
+                        );
                     }
                 }
             }
@@ -157,7 +165,11 @@ public class DiffAnalysisService {
             if (primaryException instanceof CustomApiException) {
                 throw primaryException;
             }
-            throw new RuntimeException("Could not process diff analysis due to internal error.", primaryException);
+            throw new RuntimeException(
+                    String.format(
+                            "Could not process diff analysis due to internal error. %s",
+                            primaryException.getMessage()
+                    ), primaryException);
         }
     }
 
