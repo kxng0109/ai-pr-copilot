@@ -393,8 +393,25 @@ curl http://localhost:8080/actuator/info
 
 ## CI
 
-`ci.yml` runs on pushes and pull requests. Steps: checkout, set up Temurin Java 25, cache the Maven repository, run
-`mvn -B verify`.
+`ci.yml` runs on pushes and pull requests. Steps: pinned checkout/JDK, `mvn -B verify`,
+Trivy filesystem gate (HIGH/CRITICAL). All third-party actions are SHA-pinned;
+Dependabot watches actions, Maven and Docker weekly.
+
+## Releases
+
+Tag-driven: push `vX.Y.Z` (stable) or `vX.Y.Z-rc.N` (prerelease). The tag must
+equal `pom.xml` `project.version` or the pipeline fails fast. `release.yml`
+then runs test → Trivy gates → build + checksum + smoke → image push →
+Cosign keyless signing + SLSA attestations → publishes the GitHub Release
+immediately with the full conventional changelog (`cliff.toml`,
+repo-kept `CHANGELOG.md`).
+
+Every release attaches: versioned JAR + `.sha256`, CycloneDX Maven SBOM,
+image SBOM, Cosign bundle (`.sigstore.json`), attestation bundle.
+Images land in GHCR (`X.Y.Z`, `X.Y`, `X`, plus `latest` for stable only).
+`-rc` tags publish as prereleases and never touch `latest`.
+Verify a JAR with `sha256sum -c` and the `cosign verify-blob` command
+printed in the release notes.
 
 ## Testing
 
