@@ -393,9 +393,18 @@ curl http://localhost:8080/actuator/info
 
 ## CI
 
-`ci.yml` runs on pushes and pull requests. Steps: pinned checkout/JDK, `mvn -B verify`,
-Trivy filesystem gate (HIGH/CRITICAL). All third-party actions are SHA-pinned;
-Dependabot watches actions, Maven and Docker weekly.
+`ci.yml` runs on pushes and pull requests. `build-and-test` runs `mvn -B verify`
+and uploads `target/`; `trivy` scans the built artifacts (never the source tree —
+the Maven pom parser is a known crash/429 source) with `scanners: vuln`,
+`severity: HIGH,CRITICAL`, `ignore-unfixed: true`, `exit-code: 1`.
+A separate `trivy-cache-warm.yml` pulls the Trivy DB + Java DB nightly via
+`oras pull` so scans run with `TRIVY_SKIP_DB_UPDATE=true`.
+
+All third-party actions are SHA-pinned with a version comment (currently
+`actions/checkout@v7.0.1`, `actions/setup-java@v6.0.1`,
+`github/codeql-action@v4.38.0`). Dependabot watches actions, Maven and Docker
+weekly but only auto-merges **security** updates; version bumps need manual
+review because it cannot rewrite a pinned SHA.
 
 ## Releases
 
@@ -406,10 +415,10 @@ Cosign keyless signing + SLSA attestations → publishes the GitHub Release
 immediately with the full conventional changelog (`cliff.toml`,
 repo-kept `CHANGELOG.md`).
 
-Every release attaches: versioned JAR + `.sha256`, CycloneDX Maven SBOM,
-image SBOM, Cosign bundle (`.sigstore.json`), attestation bundle.
-Images land in GHCR (`X.Y.Z`, `X.Y`, `X`, plus `latest` for stable only).
-`-rc` tags publish as prereleases and never touch `latest`.
+Every release attaches: versioned JAR + `.sha256`, CycloneDX aggregate SBOM
+(`bom.json` + `bom.xml`), image SBOM, Cosign bundle (`.sigstore.json`),
+attestation bundle. Images land in GHCR (`X.Y.Z`, `X.Y`, `X`, plus `latest`
+for stable only). `-rc` tags publish as prereleases and never touch `latest`.
 Verify a JAR with `sha256sum -c` and the `cosign verify-blob` command
 printed in the release notes.
 

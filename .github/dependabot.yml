@@ -1,17 +1,34 @@
 version: 2
 updates:
-  - package-ecosystem: github-actions
-    directory: /
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-  - package-ecosystem: maven
-    directory: /
+      interval: "weekly"
+    allow:
+      - dependency-type: "security"
+    ignore:
+      # Hold ollama/ollama until CVE-2026-85180 is independently
+      # verified fixed. Note: 0.33.3 is already OUTSIDE the affected
+      # range (0.30.0-0.33.2) per NVD; this ignore is a safety margin.
+      - dependency-name: "ollama/ollama"
+      # Do not auto-bump the Docker base image: Temurin 26 has not
+      # been validated with this runtime yet.
+      - dependency-name: "eclipse-temurin"
+      # Maven wrapper and the Maven distribution are held deliberately
+      # until the wrapper is re-generated and the new Maven is tested.
+      - dependency-name: "org.apache.maven:apache-maven"
+  - package-ecosystem: "maven"
+    directory: "/"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-  - package-ecosystem: docker
-    directory: /
+      interval: "weekly"
+    allow:
+      - dependency-type: "security"
+  - package-ecosystem: "docker"
+    directory: "/"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: "weekly"
+    allow:
+      - dependency-type: "security"
+    ignore:
+      - dependency-name: "ollama/ollama"
+      - dependency-name: "eclipse-temurin"

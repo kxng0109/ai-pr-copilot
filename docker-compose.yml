@@ -97,9 +97,13 @@ services:
 
 
   ollama:
-    # Pinned: CVE-2026-85180 has no vendor fix as of Sept 2026; never float latest.
-    # Re-check ollama/ollama releases + #17041/#17082/#18021 before bumping.
-    # Compensating controls: no untrusted model refs, egress firewall for metadata endpoints.
+    # Pinned at 0.33.3: this is the FIRST release outside the CVE-2026-85180
+    # affected range (0.30.0-0.33.2, SSRF via cross-host tensor-blob
+    # redirect, CWE-918, CVSS 7.5/8.7 HIGH). Verified 2026-09-09 against
+    # NVD (https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-85180).
+    # v0.34.0 (2026-09-05) is the current latest if you want to move up.
+    # Compensating controls: no untrusted model refs, egress firewall for
+    # cloud metadata endpoints.
     image: ollama/ollama:0.33.3
     container_name: ollama
     ports:

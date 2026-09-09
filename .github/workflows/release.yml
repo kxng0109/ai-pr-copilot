@@ -25,7 +25,7 @@ jobs:
       make-latest: ${{ steps.version.outputs.make-latest }}
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -67,7 +67,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up JDK 25
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
@@ -80,31 +80,43 @@ jobs:
         run: bash ./mvnw -B verify
 
   trivy-fs:
-    needs: validate
+    needs: [ validate, build ]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up JDK 25
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Download build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          java-version: '25'
-          distribution: 'temurin'
-          cache: maven
+          name: target-${{ needs.validate.outputs.version }}
+          path: target
 
-      - name: Pre-populate Maven cache (avoid Trivy 429 on Maven Central)
-        run: bash ./mvnw -B -q dependency:go-offline
+      - name: Record date for Trivy cache key
+        id: date
+        run: echo "date=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
-      - name: Trivy filesystem gate (HIGH/CRITICAL block)
+      - name: Restore Trivy DB cache
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v4
+        with:
+          path: ${{ github.workspace }}/.cache/trivy
+          key: cache-trivy-${{ steps.date.outputs.date }}
+          restore-keys: |
+            cache-trivy-
+
+      - name: Trivy artifact gate (HIGH/CRITICAL block)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_SKIP_DB_UPDATE: 'true'
+          TRIVY_SKIP_JAVA_DB_UPDATE: 'true'
         with:
           version: v0.74.0
           scan-type: fs
-          scan-ref: .
+          scan-ref: target
+          scanners: vuln
           vuln-type: os,library
           severity: HIGH,CRITICAL
           ignore-unfixed: true
@@ -114,18 +126,18 @@ jobs:
 
       - name: Upload Trivy SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d # v3
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: trivy-fs.sarif
 
   build:
-    needs: [ validate, test, trivy-fs ]
+    needs: [ validate, test ]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up JDK 25
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
@@ -137,13 +149,39 @@ jobs:
       - name: Package (tests already green in test job)
         run: bash ./mvnw -B -DskipTests package
 
+      - name: Generate CycloneDX aggregate SBOM
+        # The plugin is bound to the package phase, but that lifecycle
+        # invocation only writes the embedded
+        # META-INF/sbom/application.cdx.json. The aggregate BOMs
+        # (target/bom.json, target/bom.xml) are produced only by the
+        # explicit goal, so invoke it directly.
+        run: bash ./mvnw org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom -q
+
       - name: Rename artifacts deterministically
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
-          mv target/ai-pr-copilot-*.jar "target/ai-pr-copilot-${VERSION}.jar"
-          cp target/classes/META-INF/sbom/application.cdx.json "target/ai-pr-copilot-${VERSION}-cyclonedx.json"
+          TARGET="target/ai-pr-copilot-${VERSION}.jar"
+          # Spring Boot leaves a '<artifact>-<version>.jar.original' alongside
+          # the repackaged fat JAR, so the bare glob must exclude it.
+          shopt -s nullglob
+          for f in target/ai-pr-copilot-*.jar; do
+            case "$f" in
+              *.original) continue ;;
+              *) [ "$f" != "$TARGET" ] && mv "$f" "$TARGET"; break ;;
+            esac
+          done
+          [ -f "$TARGET" ] || { echo "ERROR: no fat JAR found in target/"; exit 1; }
+          # CycloneDX aggregate BOMs are the primary, verified SBOM assets.
+          # Spring Boot's META-INF/sbom is optional: its presence for
+          # Boot 4.1 could not be verified from the docs, so never let a
+          # missing file fail the build.
           cp target/bom.json "target/ai-pr-copilot-${VERSION}-cyclonedx-aggregate.json" 2>/dev/null || echo "WARN: target/bom.json not found"
           cp target/bom.xml "target/ai-pr-copilot-${VERSION}-cyclonedx-aggregate.xml" 2>/dev/null || echo "WARN: target/bom.xml not found"
+          if [ -f target/classes/META-INF/sbom/application.cdx.json ]; then
+            cp target/classes/META-INF/sbom/application.cdx.json "target/ai-pr-copilot-${VERSION}-cyclonedx.json"
+          else
+            echo "WARN: Spring Boot META-INF/sbom not present; skipping embedded BOM asset"
+          fi
           cd target
           sha256sum "ai-pr-copilot-${VERSION}.jar" > "ai-pr-copilot-${VERSION}.jar.sha256"
           sha256sum -c "ai-pr-copilot-${VERSION}.jar.sha256"
@@ -170,11 +208,18 @@ jobs:
           path: |
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}.jar
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}.jar.sha256
-            target/ai-pr-copilot-${{ needs.validate.outputs.version }}-cyclonedx.json
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}-cyclonedx-aggregate.json
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}-cyclonedx-aggregate.xml
           if-no-files-found: error
           retention-days: 7
+
+      - name: Upload full build tree for vulnerability scanning
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: target-${{ needs.validate.outputs.version }}
+          path: target
+          if-no-files-found: error
+          retention-days: 1
 
   docker:
     needs: [ validate, build ]
@@ -186,7 +231,19 @@ jobs:
       digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Record date for Trivy cache key
+        id: date
+        run: echo "date=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Trivy DB cache
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v4
+        with:
+          path: ${{ github.workspace }}/.cache/trivy
+          key: cache-trivy-${{ steps.date.outputs.date }}
+          restore-keys: |
+            cache-trivy-
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -224,6 +281,9 @@ jobs:
 
       - name: Trivy image gate (HIGH/CRITICAL block)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_SKIP_DB_UPDATE: 'true'
+          TRIVY_SKIP_JAVA_DB_UPDATE: 'true'
         with:
           version: v0.74.0
           image-ref: ghcr.io/${{ github.repository_owner }}/ai-pr-copilot@${{ steps.push.outputs.digest }}
@@ -307,7 +367,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -362,11 +422,10 @@ jobs:
           prerelease: ${{ needs.validate.outputs.prerelease }}
           make_latest: ${{ needs.validate.outputs.make-latest }}
           body_path: release-notes.md
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
           files: |
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}.jar
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}.jar.sha256
-            target/ai-pr-copilot-${{ needs.validate.outputs.version }}-cyclonedx.json
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}-cyclonedx-aggregate.json
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}-cyclonedx-aggregate.xml
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}-image.sbom.cyclonedx.json

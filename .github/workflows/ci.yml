@@ -23,7 +23,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up JDK 25
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
@@ -35,23 +35,36 @@ jobs:
       - name: Build and run tests
         run: bash ./mvnw -B verify
 
+      - name: Upload built artifacts for scanning
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-target
+          path: target
+          if-no-files-found: error
+          retention-days: 1
+
   trivy:
+    needs: build-and-test
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Pre-populate Maven cache (avoid Trivy 429 on Maven Central)
-        run: bash ./mvnw -B -q dependency:go-offline
+      - name: Download built artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-target
+          path: target
 
-      - name: Trivy filesystem gate (HIGH/CRITICAL block)
+      - name: Trivy artifact gate (HIGH/CRITICAL block)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.74.0
           scan-type: fs
-          scan-ref: .
+          scan-ref: target
+          scanners: vuln
           vuln-type: os,library
           severity: HIGH,CRITICAL
           ignore-unfixed: true
