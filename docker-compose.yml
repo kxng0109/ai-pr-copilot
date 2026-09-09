@@ -3,8 +3,8 @@ services:
     build:
       context: .
       args:
-        APP_VERSION: ${APP_VERSION:-1.0.0-rc.4}
-    image: ai-pr-copilot:${APP_VERSION:-1.0.0-rc.4}
+        APP_VERSION: ${APP_VERSION:-1.0.0-rc.5}
+    image: ai-pr-copilot:${APP_VERSION:-1.0.0-rc.5}
     container_name: ai-pr-copilot
     ports:
       - "8080:8080"
@@ -102,9 +102,8 @@ services:
     # redirect, CWE-918, CVSS 7.5/8.7 HIGH). Verified 2026-09-09 against
     # NVD (https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-85180).
     # v0.34.0 (2026-09-05) is the current latest if you want to move up.
-    # Compensating controls: no untrusted model refs, egress firewall for
-    # cloud metadata endpoints.
-    image: ollama/ollama:0.33.3
+    # Digest-pinned so the tag cannot silently drift.
+    image: ollama/ollama@sha256:32931b46719f673c05fdbaa81ccb26da18ea4a1c57590a754874ab28ba269eb2
     container_name: ollama
     ports:
       - "11434:11434"

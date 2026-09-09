@@ -1,7 +1,10 @@
 # ============================================
 # Build Stage (pinned Temurin 25 LTS)
 # ============================================
-FROM eclipse-temurin:25.0.4_1-jdk-alpine AS builder
+# Tag 25.0.4_1-jdk-alpine was removed from Docker Hub; 25.0.4_7 is the
+# current patch. Pinning by digest prevents silent tag drift and is the
+# only way to guarantee the exact image we built against.
+FROM eclipse-temurin@sha256:09349d79941fd53bb3d487b393ca118d8853c08c09193f416fe6a8718df9e732 AS builder
 
 WORKDIR /build
 
@@ -32,12 +35,14 @@ RUN java -Djarmode=tools -jar target/ai-pr-copilot-*.jar extract --layers --dest
 # ============================================
 # Runtime Stage
 # ============================================
-FROM eclipse-temurin:25.0.4_1-jre-alpine
+# Runtime Stage (Temurin 25 JRE, digest-pinned; see builder stage for
+# why the old 25.0.4_1 tag was removed and 25.0.4_7 is current).
+FROM eclipse-temurin@sha256:3137541deb3cac6626b5d9a4a2187bc0d6a34312f858bd2c67dd01e732e6b682
 
 LABEL org.opencontainers.image.title="AI PR Copilot"
 LABEL org.opencontainers.image.description="Self-hosted AI-powered code audit and PR analysis service"
 LABEL org.opencontainers.image.vendor="kxng0109"
-ARG APP_VERSION=1.0.0-rc.4
+ARG APP_VERSION=1.0.0-rc.5
 LABEL org.opencontainers.image.version="${APP_VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/kxng0109/ai-pr-copilot"
 

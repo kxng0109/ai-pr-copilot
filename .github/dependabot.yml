@@ -7,9 +7,9 @@ updates:
     allow:
       - dependency-type: "security"
     ignore:
-      # Hold ollama/ollama until CVE-2026-85180 is independently
-      # verified fixed. Note: 0.33.3 is already OUTSIDE the affected
-      # range (0.30.0-0.33.2) per NVD; this ignore is a safety margin.
+      # Hold ollama/ollama: it is digest-pinned in docker-compose.yml
+      # (0.33.3, outside CVE-2026-85180's affected range) and should
+      # only move deliberately.
       - dependency-name: "ollama/ollama"
       # Do not auto-bump the Docker base image: Temurin 26 has not
       # been validated with this runtime yet.
