@@ -17,7 +17,7 @@ public record ModelAnalyzeDiffResult(
         String title,
         String summary,
         String details,
-        List<String> risks,
+        List<RiskItem> risks,
         List<String> suggestedTests,
         List<String> touchedFiles,
         String analysisNotes

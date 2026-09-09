@@ -92,7 +92,8 @@ public class AppStartupCheckTest {
         when(multiAiConfig.getProvider()).thenReturn(AiProvider.GEMINI);
         when(multiAiConfig.isAutoFallback()).thenReturn(false);
 
-        ReflectionTestUtils.setField(appStartupCheck, "vertexAiProjectId", "my-gcp-project");
+        ReflectionTestUtils.setField(appStartupCheck, "googleGenAiProjectId", "my-gcp-project");
+        ReflectionTestUtils.setField(appStartupCheck, "googleGenAiLocation", "us-central1");
 
         assertDoesNotThrow(() -> appStartupCheck.validateConfiguration());
     }
@@ -101,7 +102,9 @@ public class AppStartupCheckTest {
     void validateConfiguration_shouldFail_whenGeminiProjectIdMissing() {
         when(multiAiConfig.getProvider()).thenReturn(AiProvider.GEMINI);
 
-        ReflectionTestUtils.setField(appStartupCheck, "vertexAiProjectId", "");
+        ReflectionTestUtils.setField(appStartupCheck, "googleGenAiProjectId", "");
+        ReflectionTestUtils.setField(appStartupCheck, "googleGenAiLocation", "");
+        ReflectionTestUtils.setField(appStartupCheck, "googleGenAiApiKey", "");
 
         CustomApiException exception = assertThrows(
                 CustomApiException.class,
@@ -109,7 +112,7 @@ public class AppStartupCheckTest {
         );
 
         assertTrue(exception.getMessage().contains("Gemini"));
-        assertTrue(exception.getMessage().contains("GEMINI_PROJECT_ID"));
+        assertTrue(exception.getMessage().contains("GOOGLE_GENAI_PROJECT_ID"));
     }
 
     @Test
@@ -138,7 +141,7 @@ public class AppStartupCheckTest {
         );
 
         assertTrue(exception.getMessage().contains("Auto-fallback is enabled"));
-        assertTrue(exception.getMessage().contains("fallback provider is not set/configured"));
+        assertTrue(exception.getMessage().contains("no fallback provider is configured"));
     }
 
     @Test

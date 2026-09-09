@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Build with Maven
+        run: |
+          ./mvnw clean package -DskipTests
+
+      - name: Rename JAR with version
+        run: |
+          mv target/ai-pr-copilot-*.jar target/ai-pr-copilot-${{ steps.version.outputs.VERSION }}.jar
+
+      - name: Generate checksums
+        run: |
+          cd target
+          sha256sum ai-pr-copilot-${{ steps.version.outputs.VERSION }}.jar > ai-pr-copilot-${{ steps.version.outputs.VERSION }}.jar.sha256
+          cat ai-pr-copilot-${{ steps.version.outputs.VERSION }}.jar.sha256
+
+      - name: Create Release Notes
+        id: release_notes
+        run: |
+          cat << EOF > release-notes.md
+          ## AI PR Copilot ${{ steps.version.outputs.VERSION }}
+          
+          ### 🚀 What's New
+          
+          - AI-powered Git diff analysis
+          - Multi-provider support: OpenAI, Anthropic Claude, Google Gemini, Ollama
+          - Risk scoring and security analysis
+          - PR title and description generation
+          - Test suggestion recommendations
+          
+          ### 📦 Installation
+          
+          #### Option 1: JAR File
+          \`\`\`bash
+          # Download the JAR
+          wget https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/ai-pr-copilot-${{ steps.version.outputs.VERSION }}.jar
+          
+          # Set your AI provider credentials
+          export OPENAI_API_KEY=your-key-here
+          # or ANTHROPIC_API_KEY, GEMINI_PROJECT_ID, etc.
+          
+          # Run the service
+          java -jar ai-pr-copilot-${{ steps.version.outputs.VERSION }}.jar
+          \`\`\`
+          
+          #### Option 2: Docker
+          \`\`\`bash
+          docker pull ghcr.io/${{ github.repository_owner }}/ai-pr-copilot:${{ steps.version.outputs.VERSION }}
+          
+          docker run -p 8080:8080 \\
+            -e OPENAI_API_KEY=your-key \\
+            ghcr.io/${{ github.repository_owner }}/ai-pr-copilot:${{ steps.version.outputs.VERSION }}
+          \`\`\`
+          
+          ### 📖 Documentation
+          
+          - [README](https://github.com/${{ github.repository }}/blob/v${{ steps.version.outputs.VERSION }}/README.md)
+          - [API Documentation](http://localhost:8080/swagger-ui.html) (after starting)
+          - [Configuration Guide](https://github.com/${{ github.repository }}/blob/v${{ steps.version.outputs.VERSION }}/.env.example)
+          
+          ### ✅ Verification
+          
+          Verify the downloaded JAR:
+          \`\`\`bash
+          sha256sum -c ai-pr-copilot-${{ steps.version.outputs.VERSION }}.jar.sha256
+          \`\`\`
+          
+          ### 🐛 Bug Reports & Feature Requests
+          
+          Please report issues at: https://github.com/${{ github.repository }}/issues
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            target/ai-pr-copilot-${{ steps.version.outputs.VERSION }}.jar
+            target/ai-pr-copilot-${{ steps.version.outputs.VERSION }}.jar.sha256
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/ai-pr-copilot
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/ai-pr-copilot:latest
+          cache-to: type=inline
+
+      - name: Release Summary
+        run: |
+          echo "✅ Release v${{ steps.version.outputs.VERSION }} completed successfully!"
+          echo ""
+          echo "📦 JAR: ai-pr-copilot-${{ steps.version.outputs.VERSION }}.jar"
+          echo "🐳 Docker: ghcr.io/${{ github.repository_owner }}/ai-pr-copilot:${{ steps.version.outputs.VERSION }}"
+          echo ""
+          echo "View release: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.VERSION }}"

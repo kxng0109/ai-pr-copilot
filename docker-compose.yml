@@ -1,0 +1,149 @@
+services:
+  ai-pr-copilot:
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-1.0.0}
+    image: ai-pr-copilot:${APP_VERSION:-1.0.0}
+    container_name: ai-pr-copilot
+    ports:
+      - "8080:8080"
+    environment:
+      - PRCOPILOT_AI_PROVIDER=${PRCOPILOT_AI_PROVIDER:-openai}
+      - PRCOPILOT_AI_FALLBACK_PROVIDER=${PRCOPILOT_AI_FALLBACK_PROVIDER:-}
+      - PRCOPILOT_AI_AUTO_FALLBACK=${PRCOPILOT_AI_AUTO_FALLBACK:-false}
+
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com}
+
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-0}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+
+      # Google GenAI (Vertex mode for production). Legacy GEMINI_* still honored as fallback.
+      - GOOGLE_GENAI_PROJECT_ID=${GOOGLE_GENAI_PROJECT_ID:-${GEMINI_PROJECT_ID:-}}
+      - GOOGLE_GENAI_LOCATION=${GOOGLE_GENAI_LOCATION:-${GEMINI_LOCATION:-us-central1}}
+      - GOOGLE_GENAI_MODEL=${GOOGLE_GENAI_MODEL:-${GEMINI_MODEL:-gemini-2.5-flash}}
+      - GOOGLE_GENAI_API_KEY=${GOOGLE_GENAI_API_KEY:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:4b}
+
+      - AI_TEMPERATURE=${AI_TEMPERATURE:-0.1}
+      - AI_MAX_TOKENS=${AI_MAX_TOKENS:-1024}
+      - AI_TIMEOUT_MILLIS=${AI_TIMEOUT_MILLIS:-30000}
+      - PRCOPILOT_AI_BULKHEAD_SAAS_MAX_CONCURRENT=${PRCOPILOT_AI_BULKHEAD_SAAS_MAX_CONCURRENT:-15}
+      - PRCOPILOT_AI_BULKHEAD_OLLAMA_MAX_CONCURRENT=${PRCOPILOT_AI_BULKHEAD_OLLAMA_MAX_CONCURRENT:-3}
+      - PRCOPILOT_AI_BULKHEAD_MAX_WAIT_MILLIS=${PRCOPILOT_AI_BULKHEAD_MAX_WAIT_MILLIS:-0}
+      - PRCOPILOT_RATELIMITER_LIMIT_FOR_PERIOD=${PRCOPILOT_RATELIMITER_LIMIT_FOR_PERIOD:-30}
+      - PRCOPILOT_RATELIMITER_REFRESH_PERIOD=${PRCOPILOT_RATELIMITER_REFRESH_PERIOD:-60s}
+      - PRCOPILOT_RATELIMITER_TIMEOUT_MILLIS=${PRCOPILOT_RATELIMITER_TIMEOUT_MILLIS:-0}
+
+      - PRCOPILOT_ANALYSIS_MAX_DIFF_CHARS=${PRCOPILOT_ANALYSIS_MAX_DIFF_CHARS:-50000}
+      - PRCOPILOT_ANALYSIS_MAX_MODEL_OUTPUT_CHARS=${PRCOPILOT_ANALYSIS_MAX_MODEL_OUTPUT_CHARS:-1000000}
+      - PRCOPILOT_ANALYSIS_DEFAULT_LANGUAGE=${PRCOPILOT_ANALYSIS_DEFAULT_LANGUAGE:-en}
+      - PRCOPILOT_ANALYSIS_DEFAULT_STYLE=${PRCOPILOT_ANALYSIS_DEFAULT_STYLE:-conventional-commits}
+      - PRCOPILOT_ANALYSIS_INCLUDE_RAW_MODEL_OUTPUT=${PRCOPILOT_ANALYSIS_INCLUDE_RAW_MODEL_OUTPUT:-false}
+      - PRCOPILOT_CACHE_DIFF_MAX_SIZE=${PRCOPILOT_CACHE_DIFF_MAX_SIZE:-1000}
+      - PRCOPILOT_CACHE_DIFF_TTL=${PRCOPILOT_CACHE_DIFF_TTL:-30m}
+      - PRCOPILOT_GATE_MIN_LEVEL=${PRCOPILOT_GATE_MIN_LEVEL:-note}
+
+      - PRCOPILOT_SARIF_CONSUMER=${PRCOPILOT_SARIF_CONSUMER:-github}
+      - PRCOPILOT_SARIF_CATEGORY=${PRCOPILOT_SARIF_CATEGORY:-ai-pr-copilot}
+      - PRCOPILOT_SUPPRESS_FILE=${PRCOPILOT_SUPPRESS_FILE:-.ai-review-ignore.yml}
+
+      - PRCOPILOT_ANALYSIS_MAX_DIFF_CHARS=${PRCOPILOT_ANALYSIS_MAX_DIFF_CHARS:-50000}
+      - PRCOPILOT_ANALYSIS_DEFAULT_LANGUAGE=${PRCOPILOT_ANALYSIS_DEFAULT_LANGUAGE:-en}
+      - PRCOPILOT_ANALYSIS_DEFAULT_STYLE=${PRCOPILOT_ANALYSIS_DEFAULT_STYLE:-conventional-commits}
+      - PRCOPILOT_ANALYSIS_INCLUDE_RAW_MODEL_OUTPUT=${PRCOPILOT_ANALYSIS_INCLUDE_RAW_MODEL_OUTPUT:-false}
+
+      - PRCOPILOT_LOG_PROMPTS=${PRCOPILOT_LOG_PROMPTS:-false}
+      - PRCOPILOT_LOG_RESPONSES=${PRCOPILOT_LOG_RESPONSES:-false}
+
+      - PRCOPILOT_AUTH_MODE=${PRCOPILOT_AUTH_MODE:-selfhost}
+      - PRCOPILOT_API_KEY=${PRCOPILOT_API_KEY:-}
+
+      - LOG_LEVEL_ROOT=${LOG_LEVEL_ROOT:-info}
+      - LOG_LEVEL_KXNG=${LOG_LEVEL_KXNG:-info}
+
+      - SERVER_TOMCAT_THREADS_MAX=${SERVER_TOMCAT_THREADS_MAX:-30}
+      - SERVER_TOMCAT_THREADS_MIN_SPARE=${SERVER_TOMCAT_THREADS_MIN_SPARE:-10}
+      - SPRING_THREADS_VIRTUAL_ENABLED=${SPRING_THREADS_VIRTUAL_ENABLED:-true}
+      - SPRING_HTTP_CLIENTS_CONNECT_TIMEOUT=${SPRING_HTTP_CLIENTS_CONNECT_TIMEOUT:-5s}
+      - SPRING_HTTP_CLIENTS_READ_TIMEOUT=${SPRING_HTTP_CLIENTS_READ_TIMEOUT:-40s}
+      - JAVA_MAX_RAM_PERCENTAGE=${JAVA_MAX_RAM_PERCENTAGE:-70}
+
+    deploy:
+      resources:
+        reservations:
+          memory: ${APP_REQUEST_MEM:-512M}
+          cpus: "${APP_REQUEST_CPU:-0.5}"
+        limits:
+          memory: ${APP_LIMIT_MEM:-1G}
+          cpus: "${APP_LIMIT_CPU:-2.0}"
+
+    volumes:
+      # Mount GCP credentials if using Gemini (Vertex mode)
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:${GOOGLE_APPLICATION_CREDENTIALS}:ro
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 20s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+    restart: unless-stopped
+
+#    depends_on:
+#      ollama:
+#        condition: service_healthy
+
+    networks:
+      - ai-network
+
+
+  ollama:
+    # Pinned: CVE-2026-85180 has no vendor fix as of Sept 2026; never float latest.
+    # Re-check ollama/ollama releases + #17041/#17082/#18021 before bumping.
+    # Compensating controls: no untrusted model refs, egress firewall for metadata endpoints.
+    image: ollama/ollama:0.33.3
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_ORIGINS=http://localhost:8080,http://localhost:11434
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
+
+    deploy:
+      resources:
+        reservations:
+          memory: ${OLLAMA_REQUEST_MEM:-2G}
+          cpus: "${OLLAMA_REQUEST_CPU:-2.0}"
+        limits:
+          memory: ${OLLAMA_LIMIT_MEM:-8G}
+          cpus: "${OLLAMA_LIMIT_CPU:-4.0}"
+
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
+
+    restart: unless-stopped
+
+    networks:
+      - ai-network
+
+volumes:
+  ollama-data:
+    driver: local
+
+networks:
+  ai-network:
+    driver: bridge

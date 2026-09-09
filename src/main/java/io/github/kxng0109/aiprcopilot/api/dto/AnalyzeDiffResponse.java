@@ -10,7 +10,8 @@ import java.util.List;
  * @param title            a brief summary of the analysis, must not be blank
  * @param summary          a concise description of the changes, must not be blank
  * @param details          detailed information about the changes, may be {@code null}
- * @param risks            potential risks or issues introduced by the changes, may be an empty list
+ * @param risks            identified risks with severity levels, may be an empty list
+ * @param riskScore        deterministic 0-100 score (error=25, warning=10, note=2, capped)
  * @param suggestedTests   tests that should be added to verify the changes, may be an empty list
  * @param touchedFiles     files that were modified by the changes, must not be empty
  * @param analysisNotes    any additional notes or comments about the analysis, may be {@code null}
@@ -18,12 +19,13 @@ import java.util.List;
  * @param requestId        a unique identifier for the request, may be {@code null}
  * @param rawModelOutput   the raw output from the AI model, may be {@code null}
  */
-@Builder
+@Builder(toBuilder = true)
 public record AnalyzeDiffResponse(
         String title,
         String summary,
         String details,
-        List<String> risks,
+        List<RiskItem> risks,
+        int riskScore,
         List<String> suggestedTests,
         List<String> touchedFiles,
         String analysisNotes,

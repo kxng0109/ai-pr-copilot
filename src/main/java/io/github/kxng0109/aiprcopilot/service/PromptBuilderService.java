@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -26,6 +27,29 @@ class PromptBuilderService {
 
     @Value("${prcopilot.prompts.system-prompt}")
     private Resource systemPromptResource;
+
+    private String cachedSystemPromptTemplate;
+
+    @PostConstruct
+    void loadSystemPromptAtStartup() {
+        cachedSystemPromptTemplate = readSystemPromptResource();
+        log.debug("System prompt cached ({} chars)", cachedSystemPromptTemplate.length());
+    }
+
+    /**
+     * Short hash of the cached system-prompt template for cache-key versioning.
+     *
+     * @return 16-char hex hash, never {@code null}
+     */
+    public String templateHash() {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(cachedSystemPromptTemplate.getBytes(StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest).substring(0, 16);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            return Integer.toHexString(cachedSystemPromptTemplate.hashCode());
+        }
+    }
 
     /**
      * Builds a {@code Prompt} for analyzing a Git diff based on the provided parameters.
@@ -47,7 +71,7 @@ class PromptBuilderService {
             Integer maxSummaryLength,
             String requestId
     ) {
-        SystemPromptTemplate promptTemplate = new SystemPromptTemplate(loadSystemPrompt());
+        SystemPromptTemplate promptTemplate = new SystemPromptTemplate(cachedSystemPromptTemplate);
         Message systemMessage = promptTemplate.createMessage(
                 Map.of("language", language, "style", style)
         );
@@ -73,12 +97,12 @@ class PromptBuilderService {
 
 
     /**
-     * Loads the system prompt content from a resource.
+     * Reads the system prompt content from the configured resource.
      *
-     * @return the loaded system prompt content as a {@code String}, never {@code null}
+     * @return the prompt template content, never {@code null}
      * @throws RuntimeException if an I/O error occurs while reading the resource
      */
-    private String loadSystemPrompt() {
+    private String readSystemPromptResource() {
         try {
             return new String(systemPromptResource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {

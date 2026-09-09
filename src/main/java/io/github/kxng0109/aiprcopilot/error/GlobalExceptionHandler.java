@@ -28,33 +28,36 @@ import java.util.Map;
 public class GlobalExceptionHandler {
 
     /**
-     * Handles {@code DiffTooLargeException} by constructing an {@code ErrorResponse}
-     * and returning it wrapped in a {@code ResponseEntity} with an HTTP 413 (Payload Too Large) status code.
+     * Handles {@code DiffTooLargeException} with HTTP 413 (Payload Too Large).
      *
      * @param ex      the exception that occurred, must not be {@code null}
      * @param request the HTTP request that caused the exception, must not be {@code null}
      * @return a response entity containing error details, never {@code null}
      */
     @ExceptionHandler(DiffTooLargeException.class)
-    public ResponseEntity<ErrorResponse> handleDiffTooLargeException(
-            DiffTooLargeException ex,
+    public ResponseEntity<ErrorResponse> handleDiffTooLargeException(            DiffTooLargeException ex,
             HttpServletRequest request
     ) {
-        HttpStatus status = HttpStatus.PAYLOAD_TOO_LARGE;
-        ErrorResponse errorResponse = ErrorResponse.builder()
-                                                   .timestamp(OffsetDateTime.now())
-                                                   .statusCode(status.value())
-                                                   .error(status.getReasonPhrase())
-                                                   .message(ex.getMessage())
-                                                   .path(request.getRequestURI())
-                                                   .build();
-
-        return ResponseEntity.status(status).body(errorResponse);
+        return build(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), request);
     }
 
     /**
-     * Handles {@code NoResourceFoundException} by constructing an {@code ErrorResponse} and
-     * returning it wrapped in a {@code ResponseEntity} with an HTTP 404 status code.
+     * Handles {@code BlockedDiffException} with HTTP 400 (no LLM call was made).
+     *
+     * @param ex      the exception that occurred, must not be {@code null}
+     * @param request the HTTP request that caused the exception, must not be {@code null}
+     * @return a response entity containing error details, never {@code null}
+     */
+    @ExceptionHandler(BlockedDiffException.class)
+    public ResponseEntity<ErrorResponse> handleBlockedDiffException(
+            BlockedDiffException ex,
+            HttpServletRequest request
+    ) {
+        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request);
+    }
+
+    /**
+     * Handles {@code NoResourceFoundException} with HTTP 404.
      *
      * @param ex      the exception that occurred, must not be {@code null}
      * @param request the HTTP request that caused the exception, must not be {@code null}
@@ -65,22 +68,12 @@ public class GlobalExceptionHandler {
             NoResourceFoundException ex,
             HttpServletRequest request
     ) {
-        HttpStatus status = HttpStatus.NOT_FOUND;
-
-        ErrorResponse errorResponse = ErrorResponse.builder()
-                                                   .timestamp(OffsetDateTime.now())
-                                                   .statusCode(status.value())
-                                                   .error(status.getReasonPhrase())
-                                                   .message(ex.getMessage())
-                                                   .path(request.getRequestURI())
-                                                   .build();
-
-        return ResponseEntity.status(status).body(errorResponse);
+        return build(HttpStatus.NOT_FOUND, ex.getMessage(), request);
     }
 
     /**
-     * Handles {@code MethodArgumentNotValidException} by constructing an {@code ErrorResponse} containing
-     * validation error details and returning it in a {@code ResponseEntity} with an HTTP 400 status code.
+     * Handles {@code MethodArgumentNotValidException} with HTTP 400, including
+     * validation error details.
      *
      * @param ex      the exception that occurred, must not be {@code null}
      * @param request the HTTP request that caused the exception, must not be {@code null}
@@ -91,8 +84,6 @@ public class GlobalExceptionHandler {
             MethodArgumentNotValidException ex,
             HttpServletRequest request
     ) {
-        HttpStatus status = HttpStatus.BAD_REQUEST;
-
         Map<String, String> errors = new HashMap<>();
         ex.getBindingResult().getAllErrors().forEach((error) -> {
             String fieldName = ((FieldError) error).getField();
@@ -100,47 +91,26 @@ public class GlobalExceptionHandler {
             errors.put(fieldName, errorMessage);
         });
 
-        ErrorResponse errorResponse = ErrorResponse.builder()
-                                                   .timestamp(OffsetDateTime.now())
-                                                   .statusCode(status.value())
-                                                   .error(status.getReasonPhrase())
-                                                   .message(errors.toString())
-                                                   .path(request.getRequestURI())
-                                                   .build();
-
-        return ResponseEntity.status(status).body(errorResponse);
+        return build(HttpStatus.BAD_REQUEST, errors.toString(), request);
     }
 
     /**
-     * Handles {@code HttpRequestMethodNotSupportedException} by generating a response entity
-     * containing error details and an HTTP 405 status code.
+     * Handles {@code HttpRequestMethodNotSupportedException} with HTTP 405.
      *
      * @param ex      the exception that occurred, must not be {@code null}
      * @param request the HTTP request that caused the exception, must not be {@code null}
      * @return a response entity containing error information, never {@code null}
      */
-
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ErrorResponse> handleHttpRequestMethodNotSupportedException(
             HttpRequestMethodNotSupportedException ex,
             HttpServletRequest request
     ) {
-        HttpStatus status = HttpStatus.METHOD_NOT_ALLOWED;
-
-        ErrorResponse errorResponse = ErrorResponse.builder()
-                                                   .timestamp(OffsetDateTime.now())
-                                                   .statusCode(status.value())
-                                                   .error(status.getReasonPhrase())
-                                                   .message(ex.getMessage())
-                                                   .path(request.getRequestURI())
-                                                   .build();
-
-        return ResponseEntity.status(status).body(errorResponse);
+        return build(HttpStatus.METHOD_NOT_ALLOWED, ex.getMessage(), request);
     }
 
     /**
-     * Handles {@code HttpMessageNotReadableException} by constructing an {@code ErrorResponse}
-     * and returning it wrapped in a {@code ResponseEntity} with an HTTP 400 (Bad Request) status code.
+     * Handles {@code HttpMessageNotReadableException} with HTTP 400.
      *
      * <p>Provides a more descriptive error message if the request body is missing.
      *
@@ -153,27 +123,17 @@ public class GlobalExceptionHandler {
             HttpMessageNotReadableException ex,
             HttpServletRequest request
     ){
-        HttpStatus status = HttpStatus.BAD_REQUEST;
         String message = ex.getMessage();
 
         if(message != null && message.contains("request body is missing")){
             message = "Request body is missing. JSON object required.";
         }
 
-        ErrorResponse errorResponse = ErrorResponse.builder()
-                                                   .timestamp(OffsetDateTime.now())
-                                                   .statusCode(status.value())
-                                                   .error(status.getReasonPhrase())
-                                                   .message(message)
-                                                   .path(request.getRequestURI())
-                                                   .build();
-
-        return ResponseEntity.status(status).body(errorResponse);
+        return build(HttpStatus.BAD_REQUEST, message, request);
     }
 
     /**
-     * Handles {@code ModelOutputParseException} by constructing an {@code ErrorResponse} containing
-     * error details and returning it wrapped in a {@code ResponseEntity} with an HTTP 422 (Unprocessable Entity) status code.
+     * Handles {@code ModelOutputParseException} with HTTP 422 (Unprocessable Entity).
      *
      * @param ex the exception that occurred, must not be {@code null}
      * @param request the HTTP request that caused the exception, must not be {@code null}
@@ -184,22 +144,11 @@ public class GlobalExceptionHandler {
             ModelOutputParseException ex,
             HttpServletRequest request
     ){
-        HttpStatus status = HttpStatus.UNPROCESSABLE_ENTITY;
-
-        ErrorResponse errorResponse = ErrorResponse.builder()
-                                                   .timestamp(OffsetDateTime.now())
-                                                   .statusCode(status.value())
-                                                   .error(status.getReasonPhrase())
-                                                   .message(ex.getMessage())
-                                                   .path(request.getRequestURI())
-                                                   .build();
-
-        return ResponseEntity.status(status).body(errorResponse);
+        return build(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage(), request);
     }
 
     /**
-     * Handles {@link CustomApiException} by constructing an {@code ErrorResponse} and
-     * returning it wrapped in a {@code ResponseEntity} with the corresponding HTTP status code.
+     * Handles {@link CustomApiException} with its corresponding HTTP status code.
      *
      * @param ex the exception that occurred, must not be {@code null}
      * @param request the HTTP request that caused the exception, must not be {@code null}
@@ -210,22 +159,11 @@ public class GlobalExceptionHandler {
             CustomApiException ex,
             HttpServletRequest request
     ){
-        HttpStatus status = ex.getHttpStatus();
-
-        ErrorResponse errorResponse = ErrorResponse.builder()
-                                                   .timestamp(OffsetDateTime.now())
-                                                   .statusCode(status.value())
-                                                   .error(status.getReasonPhrase())
-                                                   .message(ex.getMessage())
-                                                   .path(request.getRequestURI())
-                                                   .build();
-
-        return ResponseEntity.status(status).body(errorResponse);
+        return build(ex.getHttpStatus(), ex.getMessage(), request);
     }
 
     /**
-     * Handles general exceptions by constructing an {@code ErrorResponse} and returning it
-     * wrapped in a {@code ResponseEntity} with an HTTP 500 status code.
+     * Handles general exceptions with HTTP 500.
      *
      * @param ex      the exception that occurred, must not be {@code null}
      * @param request the HTTP request that caused the exception, must not be {@code null}
@@ -236,12 +174,16 @@ public class GlobalExceptionHandler {
             Exception ex,
             HttpServletRequest request
     ) {
-        HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, ex.getMessage(), request);
+    }
+
+    private ResponseEntity<ErrorResponse> build(
+            HttpStatus status, String message, HttpServletRequest request) {
         ErrorResponse errorResponse = ErrorResponse.builder()
                                                    .timestamp(OffsetDateTime.now())
                                                    .statusCode(status.value())
                                                    .error(status.getReasonPhrase())
-                                                   .message(ex.getMessage())
+                                                   .message(message)
                                                    .path(request.getRequestURI())
                                                    .build();
 

@@ -20,7 +20,7 @@ The JSON must strictly adhere to this schema:
   "summary": "A neutral, objective summary of what changed (max 2 sentences).",
   "details": "A detailed technical breakdown of the implementation. Mention specific logic changes.",
   "risks": [
-    "String array of specific risks. Be pedantic. If no risks, return an empty array."
+    {"level": "error|warning|note", "message": "Specific risk. Be pedantic. If no risks, return an empty array."}
   ],
   "suggestedTests": [
     "String array of specific unit or integration test cases required to verify this change."
@@ -35,3 +35,4 @@ The JSON must strictly adhere to this schema:
 - **NO HALLUCINATIONS**: Do not reference libraries or imports not visible in the diff.
 - **NO EXPLANATORY TEXT**: Output ONLY the JSON object. No markdown fences (```json), no conversational filler.
 - **STRICT JSON**: Ensure all keys are present. Ensure the JSON is parsable.
+- **RISK LEVELS**: Every entry in "risks" must have "level" exactly one of "error", "warning", "note" and a non-blank "message". Use "error" for vulnerabilities/data-loss/crashes, "warning" for probable bugs/perf regressions, "note" for minor concerns.

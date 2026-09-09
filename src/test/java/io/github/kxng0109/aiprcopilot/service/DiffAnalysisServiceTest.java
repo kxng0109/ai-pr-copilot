@@ -6,6 +6,7 @@ import io.github.kxng0109.aiprcopilot.config.AiProvider;
 import io.github.kxng0109.aiprcopilot.config.MultiAiConfigurationProperties;
 import io.github.kxng0109.aiprcopilot.config.PrCopilotAnalysisProperties;
 import io.github.kxng0109.aiprcopilot.config.PrCopilotLoggingProperties;
+import io.github.kxng0109.aiprcopilot.error.CustomApiException;
 import io.github.kxng0109.aiprcopilot.error.DiffTooLargeException;
 import io.github.kxng0109.aiprcopilot.error.ModelOutputParseException;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
+import org.springframework.ai.chat.metadata.DefaultUsage;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -45,7 +47,7 @@ public class DiffAnalysisServiceTest {
     private ChatClient primaryChatClient;
 
     @Mock
-    private ChatOptions primaryChatOptions;
+    private ChatOptions.Builder primaryChatOptions;
 
     @Mock
     private PromptBuilderService promptBuilderService;
@@ -56,10 +58,23 @@ public class DiffAnalysisServiceTest {
     @Mock
     private DiffResponseMapperService diffResponseMapperService;
 
+    @Mock
+    private io.github.resilience4j.bulkhead.BulkheadRegistry bulkheadRegistry;
+
+    @Mock
+    private io.github.resilience4j.bulkhead.Bulkhead bulkhead;
+
+    @Mock
+    private com.github.benmanes.caffeine.cache.Cache<String, AnalyzeDiffResponse> analysisCache;
+
+    @Mock
+    private AnalysisMetrics analysisMetrics;
+
     @InjectMocks
     private DiffAnalysisService diffAnalysisService;
 
     @BeforeEach
+    @SuppressWarnings("unchecked")
     public void setup() {
         lenient().when(analysisProperties.getDefaultLanguage()).thenReturn("en");
         lenient().when(analysisProperties.getMaxDiffChars()).thenReturn(50000);
@@ -68,6 +83,12 @@ public class DiffAnalysisServiceTest {
 
         lenient().when(multiAiConfigurationProperties.getProvider()).thenReturn(AiProvider.OPENAI);
         lenient().when(multiAiConfigurationProperties.isAutoFallback()).thenReturn(false);
+        lenient().when(multiAiConfigurationProperties.getTemperature()).thenReturn(0.1);
+        lenient().when(multiAiConfigurationProperties.getMaxTokens()).thenReturn(1024);
+        lenient().when(promptBuilderService.templateHash()).thenReturn("testhash");
+        lenient().when(bulkheadRegistry.bulkhead(anyString())).thenReturn(bulkhead);
+        lenient().doAnswer(i -> ((java.util.function.Supplier<?>) i.getArgument(0)).get())
+                .when(bulkhead).executeSupplier(any());
 
         diffAnalysisService = new DiffAnalysisService(
                 analysisProperties,
@@ -78,6 +99,9 @@ public class DiffAnalysisServiceTest {
                 promptBuilderService,
                 aiChatService,
                 diffResponseMapperService,
+                bulkheadRegistry,
+                analysisCache,
+                analysisMetrics,
                 null,
                 null
         );
@@ -230,7 +254,7 @@ public class DiffAnalysisServiceTest {
         when(multiAiConfigurationProperties.getFallbackProvider()).thenReturn(AiProvider.ANTHROPIC);
 
         ChatClient fallbackChatClient = mock(ChatClient.class);
-        ChatOptions fallbackChatOptions = mock(ChatOptions.class);
+        ChatOptions.Builder fallbackChatOptions = mock(ChatOptions.Builder.class);
 
         diffAnalysisService = new DiffAnalysisService(
                 analysisProperties,
@@ -241,6 +265,9 @@ public class DiffAnalysisServiceTest {
                 promptBuilderService,
                 aiChatService,
                 diffResponseMapperService,
+                bulkheadRegistry,
+                analysisCache,
+                analysisMetrics,
                 fallbackChatClient,
                 fallbackChatOptions
         );
@@ -284,7 +311,7 @@ public class DiffAnalysisServiceTest {
         when(multiAiConfigurationProperties.getFallbackProvider()).thenReturn(AiProvider.ANTHROPIC);
 
         ChatClient fallbackChatClient = mock(ChatClient.class);
-        ChatOptions fallbackChatOptions = mock(ChatOptions.class);
+        ChatOptions.Builder fallbackChatOptions = mock(ChatOptions.Builder.class);
 
         diffAnalysisService = new DiffAnalysisService(
                 analysisProperties,
@@ -295,6 +322,9 @@ public class DiffAnalysisServiceTest {
                 promptBuilderService,
                 aiChatService,
                 diffResponseMapperService,
+                bulkheadRegistry,
+                analysisCache,
+                analysisMetrics,
                 fallbackChatClient,
                 fallbackChatOptions
         );
@@ -348,32 +378,68 @@ public class DiffAnalysisServiceTest {
         verify(loggingProperties).isLogPrompts();
     }
 
+    @Test
+    void analyzeDiff_shouldReturnCachedResponse_whenDiffHashSeenBefore() {
+        when(analysisProperties.getCacheMaxSize()).thenReturn(1000);
+        AnalyzeDiffResponse cached = AnalyzeDiffResponse.builder()
+                                                        .title("cached title")
+                                                        .requestId("old-req")
+                                                        .build();
+        when(analysisCache.getIfPresent(anyString())).thenReturn(cached);
+
+        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+                                                        .diff("diff")
+                                                        .requestId("req-1")
+                                                        .build();
+
+        AnalyzeDiffResponse response = diffAnalysisService.analyzeDiff(request);
+
+        assertNotNull(response);
+        assertEquals("cached title", response.title());
+        assertEquals("req-1", response.requestId());
+        verify(aiChatService, never()).callAiModel(any(), any(), any());
+        verify(analysisMetrics).countCacheHit("openai");
+    }
+
+        @Test
+    void analyzeDiff_shouldThrow429_whenProviderBulkheadFull() {        doThrow(io.github.resilience4j.bulkhead.BulkheadFullException.createBulkheadFullException(
+                        io.github.resilience4j.bulkhead.Bulkhead.ofDefaults("test")))
+                .when(bulkhead).executeSupplier(any());
+
+        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+                                                        .diff("diff")
+                                                        .requestId("req-1")
+                                                        .build();
+
+        CustomApiException exception = assertThrows(
+                CustomApiException.class,
+                () -> diffAnalysisService.analyzeDiff(request)
+        );
+
+        assertEquals(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS, exception.getHttpStatus());
+    }
+
+    @Test
+    void analyzeDiff_shouldRethrowBlockedDiff_withoutFallback() {
+        when(aiChatService.callAiModel(any(), any(), any()))
+                .thenThrow(new io.github.kxng0109.aiprcopilot.error.BlockedDiffException("Blocked: test"));
+
+        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+                                                        .diff("diff")
+                                                        .requestId("req-1")
+                                                        .build();
+
+        assertThrows(io.github.kxng0109.aiprcopilot.error.BlockedDiffException.class,
+                     () -> diffAnalysisService.analyzeDiff(request));
+        verify(aiChatService, times(1)).callAiModel(any(), any(), any());
+    }
+
     private ChatResponse mockChatResponse() {
         Generation generation = new Generation(
                 new AssistantMessage("Some details or message")
         );
 
-        Usage usage = new Usage() {
-            @Override
-            public Integer getPromptTokens() {
-                return 0;
-            }
-
-            @Override
-            public Integer getCompletionTokens() {
-                return 0;
-            }
-
-            @Override
-            public Object getNativeUsage() {
-                return null;
-            }
-
-            @Override
-            public Integer getTotalTokens() {
-                return 120;
-            }
-        };
+        Usage usage = new DefaultUsage(0, 0, 120);
 
         ChatResponseMetadata chatResponseMetadata = ChatResponseMetadata.builder()
                                                                         .model("gpt-4o")

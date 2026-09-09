@@ -48,12 +48,24 @@ analyzes Git diffs using language models to provide structured reviews, identify
 
 ## Supported AI Providers
 
-| Provider      | Models                                    | Authentication                 |
-|---------------|-------------------------------------------|--------------------------------|
-| OpenAI        | GPT-4o, GPT-4o-mini, GPT-3.5-turbo        | API Key                        |
-| Anthropic     | Claude Sonnet 4, Claude Opus 4            | API Key                        |
-| Google Gemini | Gemini 2.0 Flash, Gemini Pro              | GCP Project ID and credentials |
-| Ollama        | Local models (Qwen, Llama, Mistral, etc.) | Local installation             |
+| Provider      | Models                                    | Authentication                                  |
+|---------------|-------------------------------------------|-------------------------------------------------|
+| OpenAI        | GPT-4o, GPT-4o-mini                       | API Key                                         |
+| Anthropic     | Claude Sonnet 4, Claude Opus 4            | API Key                                         |
+| Google Gemini | Gemini 2.5 Flash (via Google GenAI)       | GCP Project ID + location + ADC (Vertex mode)   |
+| Ollama        | Local models (Qwen, Llama, Mistral, etc.) | Local installation                              |
+
+Stack: Java 25 · Spring Boot 4.1.1 · Spring AI 2.0.1 · Jackson 3 (ISO-8601 dates) ·
+Spring Security 7 (OIDC in `prod`, API key in `selfhost`) · Picocli 4.7.7
+(Boot-4 factory vendored in `cli.picocli4`) · springdoc 3.1.0.
+
+Versioning: single source is `pom.xml` `project/version` (current `1.0.0`).
+It propagates to `application.yml` (`info.project.version`,
+`spring.application.version` via `@project.version@` resource filtering),
+`config.AppInfo` (code), Docker label/tag (`APP_VERSION` build arg,
+`APP_VERSION` env tag), and the release workflow (git tag `v*.*.*`).
+`config.AppVersionTest` fails the build if `AppInfo` drifts from the POM —
+bump both together; Docker image/Compose default to the same version.
 
 ## Prerequisites
 
@@ -122,6 +134,12 @@ http://localhost:8080/api-docs
 
 - Method: `POST /api/v1/analyze-diff`
 - Content Type: `application/json`
+- Rate-limited (30/min default) + provider bulkheads (fail-fast 429); repeated diffs served from diff-hash cache.
+- Input guardrail on every LLM call (both blocking and streaming paths): size cap,
+  instruction-override denylist, and secret pre-scan. High-confidence secrets
+  (provider IDs, PEM blocks) hard-block with `400` and zero LLM cost; generic
+  high-entropy assignments are redacted and analysis continues; PII-shaped content
+  only warns. Scan failures fail closed.
 
 ### Example Request
 
@@ -145,10 +163,11 @@ curl -X POST http://localhost:8080/api/v1/analyze-diff \
 	"summary": "Modified getUser method to throw UserNotFoundException when user is not found instead of returning null.",
 	"details": "The getUser method signature now includes a throws clause for UserNotFoundException. The implementation uses Optional.orElseThrow() to raise an exception when the database query returns empty, replacing the previous behavior of returning null.",
 	"risks": [
-		"Breaking change: existing callers must now handle UserNotFoundException",
-		"No null checks are present in the diff; ensure all callers are updated",
-		"UserNotFoundException is not defined in this diff; verify it exists in the codebase"
+		{"level": "error", "message": "Breaking change: existing callers must now handle UserNotFoundException"},
+		{"level": "warning", "message": "No null checks are present in the diff; ensure all callers are updated"},
+		{"level": "note", "message": "UserNotFoundException is not defined in this diff; verify it exists in the codebase"}
 	],
+	"riskScore": 37,
 	"suggestedTests": [
 		"Test that getUser throws UserNotFoundException when user does not exist",
 		"Test that getUser returns valid User object when user exists",
@@ -186,13 +205,33 @@ curl -X POST http://localhost:8080/api/v1/analyze-diff \
 | `title`          | string | Short technical title of the change      |
 | `summary`        | string | Concise description of what changed      |
 | `details`        | string | Detailed breakdown of the implementation |
-| `risks`          | array  | Specific risks or issues                 |
+| `risks`          | array  | `{level: error\|warning\|note, message}`  |
+| `riskScore`      | number | Deterministic 0-100 (error=25, warning=10, note=2, capped) |
 | `suggestedTests` | array  | Recommended test cases                   |
 | `touchedFiles`   | array  | Modified files                           |
 | `analysisNotes`  | string | Additional notes or caveats              |
 | `metadata`       | object | AI call metadata                         |
 | `requestId`      | string | Echo of the request ID                   |
 | `rawModelOutput` | string | Raw model output if enabled              |
+
+### SARIF Endpoint
+
+- Method: `POST /api/v1/analyze-diff/sarif`
+- Content Type out: `application/sarif+json` (SARIF 2.1.0)
+- Same analysis, stable `ruleId` (`APR-<hash>`), `primaryLocationLineHash` fingerprints,
+  `runAutomationDetails.id` category. Upload to GitHub Code Scanning
+  (`github/codeql-action/upload-sarif`, `category: ai-pr-copilot`) or SonarQube
+  (`sonar.sarifReportPaths`). Findings below `PRCOPILOT_GATE_MIN_LEVEL`
+  (`note|warning|error`) are filtered at emit time; entries in
+  `PRCOPILOT_SUPPRESS_FILE` (default `.ai-review-ignore.yml`, YAML list of
+  `{ruleId|fingerprint, reason, expires: YYYY-MM-DD}`) are excluded.
+
+### Streaming Endpoint
+
+- Method: `POST /api/v1/analyze-diff/stream`
+- Content Type out: `text/event-stream`
+- Events: `started`, per-chunk `token`, `result`, `done` (`live|cached`), `error`.
+  Cache hits emit the stored result immediately without an AI call.
 
 ## Configuration Reference
 
@@ -211,10 +250,36 @@ AI_TIMEOUT_MILLIS=30000
 
 ```bash
 PRCOPILOT_ANALYSIS_MAX_DIFF_CHARS=50000
+PRCOPILOT_ANALYSIS_MAX_MODEL_OUTPUT_CHARS=1000000
 PRCOPILOT_ANALYSIS_DEFAULT_LANGUAGE=en
 PRCOPILOT_ANALYSIS_DEFAULT_STYLE=conventional-commits
 PRCOPILOT_ANALYSIS_INCLUDE_RAW_MODEL_OUTPUT=false
+PRCOPILOT_CACHE_DIFF_MAX_SIZE=1000
+PRCOPILOT_CACHE_DIFF_TTL=30m
+PRCOPILOT_GATE_MIN_LEVEL=note
 ```
+
+### Responsiveness / Resources (all optional)
+
+```bash
+SERVER_TOMCAT_THREADS_MAX=30
+SPRING_THREADS_VIRTUAL_ENABLED=true
+PRCOPILOT_AI_BULKHEAD_SAAS_MAX_CONCURRENT=15
+PRCOPILOT_AI_BULKHEAD_OLLAMA_MAX_CONCURRENT=3
+PRCOPILOT_RATELIMITER_LIMIT_FOR_PERIOD=30
+PRCOPILOT_RATELIMITER_REFRESH_PERIOD=60s
+SPRING_HTTP_CLIENTS_CONNECT_TIMEOUT=5s
+SPRING_HTTP_CLIENTS_READ_TIMEOUT=40s
+JAVA_MAX_RAM_PERCENTAGE=70
+```
+
+Prometheus metrics at `/actuator/prometheus`: `aiprcopilot.analysis.duration`
+(`provider`, `outcome`), `aiprcopilot.analysis.cache` (`hit|miss`).
+
+### Images
+
+- Default: JVM + layered + AOT cache (trained in Docker build; `AOTCACHE_ENABLED=0` skips).
+- Opt-in native: `mvn -Pnative package` (GraalVM; gated on provider×fallback smoke tests).
 
 ### Fallback Configuration
 
@@ -243,14 +308,18 @@ ANTHROPIC_API_KEY=sk-ant-your-anthropic-key-here
 ANTHROPIC_MODEL=claude-sonnet-4-0
 ```
 
-### Google Gemini
+### Google Gemini (Google GenAI, Vertex mode)
 
 ```bash
 PRCOPILOT_AI_PROVIDER=gemini
-GEMINI_PROJECT_ID=your-gcp-project-id
-GEMINI_LOCATION=us-central1
-GEMINI_MODEL=gemini-2.0-flash
+GOOGLE_GENAI_PROJECT_ID=your-gcp-project-id
+GOOGLE_GENAI_LOCATION=us-central1
+GOOGLE_GENAI_MODEL=gemini-2.5-flash
 ```
+
+Legacy `GEMINI_*` names still work as fallback. Authenticate with Application Default
+Credentials (`GOOGLE_APPLICATION_CREDENTIALS`). `GOOGLE_GENAI_API_KEY` is prototyping
+only (no residency/ZDR guarantees) — never use it for production diffs.
 
 Follow Google Cloud Vertex AI documentation for authentication and project setup.
 
@@ -289,6 +358,23 @@ Example:
 }
 ```
 
+## Authentication
+
+Deny-by-default. Public only: `/actuator/health`, `/actuator/info`, `/api-docs/**`, `/swagger-ui/**`.
+
+- `selfhost` (default, regular users): pre-shared API key, no IdP.
+  ```bash
+  PRCOPILOT_AUTH_MODE=selfhost
+  PRCOPILOT_API_KEY=change-me-to-a-long-random-value
+  curl -H "Authorization: Bearer $PRCOPILOT_API_KEY" http://localhost:8080/api/v1/analyze-diff ...
+  ```
+  Empty key keeps `/api/v1/**` locked (401). CLI `--quiet --format json|compact` for scripting.
+- `prod` (enterprise): OIDC JWT required, fail-closed with no default issuer.
+  ```bash
+  PRCOPILOT_AUTH_MODE=prod
+  SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI=https://auth.example.com/realms/ai-pr-copilot
+  ```
+
 ## Health Checks
 
 The service exposes Spring Boot Actuator endpoints for monitoring:
@@ -320,12 +406,14 @@ mvn test
 
 ## Architecture Overview
 
-- Controller: `DiffAnalysisController`
-- Services: `DiffAnalysisService`, `AiChatService`, `PromptBuilderService`, `DiffResponseMapperService`
+- Controller: `DiffAnalysisController` (`/analyze-diff`, `/analyze-diff/sarif`, `/analyze-diff/stream`)
+- Services: `DiffAnalysisService` (cache+bulkhead+telemetry), `AiChatService` (virtual-thread executor, SSE flux), `PromptBuilderService` (cached template), `DiffResponseMapperService`, `GitService`, `SarifService`, `AnalysisMetrics`, `SecretScanService`, `DiffGuardrailAdvisor` (Call+StreamAdvisor, highest precedence)
 - Configuration and validation: `MultiAiConfigurationProperties`, `PrCopilotAnalysisProperties`,
-  `PrCopilotLoggingProperties`, startup checks in `AppStartupCheck`
+  `PrCopilotLoggingProperties`, `PrCopilotAuthProperties`, `PrCopilotSarifProperties`, startup checks in `AppStartupCheck`
+- Security: `SecurityConfig` (prod OIDC / selfhost API key), `ApiKeyAuthFilter` (constant-time compare)
+- CLI: `CliRunner`, `AnalyzeCommand` (`--base/--staged/--uncommitted/--format/--quiet`), Boot-4 factory in `cli.picocli4`
 - Error handling: `GlobalExceptionHandler`
-- Uses Spring AI to switch between providers
+- Uses Spring AI 2.0 to switch between providers (Google Gemini via `GoogleGenAiChatModel`, Vertex mode)
 
 ## License
 

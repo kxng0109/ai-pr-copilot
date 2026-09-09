@@ -2,7 +2,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health, info
+        include: health, info, prometheus, caches
   info:
     env:
       enabled: true
@@ -11,7 +11,7 @@ info:
   project:
     name: AI PR Copilot
     description: "Self-hosted AI-powered code audit and PR analysis service with multi-provider support"
-    version: "1.0.0"
+    version: "@project.version@"
 
 springdoc:
   api-docs:
@@ -29,62 +29,126 @@ prcopilot:
     default-language: ${PRCOPILOT_ANALYSIS_DEFAULT_LANGUAGE:en}
     # The default "style" for titles/descriptions
     default-style: ${PRCOPILOT_ANALYSIS_DEFAULT_STYLE:conventional-commits}
-    # Include raw model output in the response (useful for debugging)
+    # Include raw model output in the response (useful for debugging; keep false in prod)
     include-raw-model-output: ${PRCOPILOT_ANALYSIS_INCLUDE_RAW_MODEL_OUTPUT:false}
+    # Hard ceiling on model output chars parsed (DoS guard; model maxTokens bounds this anyway)
+    max-model-output-chars: ${PRCOPILOT_ANALYSIS_MAX_MODEL_OUTPUT_CHARS:1000000}
+    # Diff-hash response cache (0 = disabled)
+    cache-max-size: ${PRCOPILOT_CACHE_DIFF_MAX_SIZE:1000}
+    cache-ttl: ${PRCOPILOT_CACHE_DIFF_TTL:30m}
+    # Minimum severity to include in responses/SARIF (note|warning|error)
+    min-level: ${PRCOPILOT_GATE_MIN_LEVEL:note}
 
   logging:
-    # Whether to log prompts and/or responses
-    log-prompts: ${LOG_PROMPTS:false}
-    log-responses: ${LOG_RESPONSES:false}
+    # Whether to log prompts and/or responses (never raw diffs; metadata only)
+    log-prompts: ${PRCOPILOT_LOG_PROMPTS:false}
+    log-responses: ${PRCOPILOT_LOG_RESPONSES:false}
 
   ai:
     # Primary AI provider: openai, anthropic, gemini, ollama
     provider: ${PRCOPILOT_AI_PROVIDER:openai}
-    # Optional fallback provider
+    # Optional fallback provider (empty = none)
     fallback-provider: ${PRCOPILOT_AI_FALLBACK_PROVIDER:}
     # Enable automatic fallback
     auto-fallback: ${PRCOPILOT_AI_AUTO_FALLBACK:false}
     temperature: ${AI_TEMPERATURE:0.1}
     max-tokens: ${AI_MAX_TOKENS:1024}
     timeout-millis: ${AI_TIMEOUT_MILLIS:30000}
+    # Concurrency bulkheads (fail-fast 429 when full)
+    bulkhead-saas-max-concurrent: ${PRCOPILOT_AI_BULKHEAD_SAAS_MAX_CONCURRENT:15}
+    bulkhead-ollama-max-concurrent: ${PRCOPILOT_AI_BULKHEAD_OLLAMA_MAX_CONCURRENT:3}
+    bulkhead-max-wait-millis: ${PRCOPILOT_AI_BULKHEAD_MAX_WAIT_MILLIS:0}
+    # API rate limit (per instance)
+    ratelimit-for-period: ${PRCOPILOT_RATELIMITER_LIMIT_FOR_PERIOD:30}
+    ratelimit-refresh-period: ${PRCOPILOT_RATELIMITER_REFRESH_PERIOD:1m}
+    ratelimit-timeout-millis: ${PRCOPILOT_RATELIMITER_TIMEOUT_MILLIS:0}
 
   prompts:
     system-prompt: classpath:prompts/system-prompt.txt
 
+  auth:
+    # prod profile: OIDC issuer required (fail-closed, no default).
+    # selfhost profile: single-user API key instead of OIDC.
+    mode: ${PRCOPILOT_AUTH_MODE:selfhost}
+    api-key: ${PRCOPILOT_API_KEY:}
+    api-key-header: Authorization
+
+  sarif:
+    # SARIF consumer this output targets: github (Code Scanning) or sonar
+    consumer: ${PRCOPILOT_SARIF_CONSUMER:github}
+    category: ${PRCOPILOT_SARIF_CATEGORY:ai-pr-copilot}
+    # Path to repo-local false-positive suppress file (empty = no suppression)
+    suppress-file: ${PRCOPILOT_SUPPRESS_FILE:.ai-review-ignore.yml}
+
 spring:
+  threads:
+    virtual:
+      enabled: ${SPRING_THREADS_VIRTUAL_ENABLED:true}
+  http:
+    clients:
+      connect-timeout: ${SPRING_HTTP_CLIENTS_CONNECT_TIMEOUT:5s}
+      read-timeout: ${SPRING_HTTP_CLIENTS_READ_TIMEOUT:40s}
   ai:
+    model:
+      chat: ${SPRING_AI_MODEL_CHAT:}
     openai:
       api-key: ${OPENAI_API_KEY:default-value}
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}
       chat:
-        options:
-          model: ${OPENAI_MODEL:gpt-4o}
+        model: ${OPENAI_MODEL:gpt-4o-mini}
 
     anthropic:
       api-key: ${ANTHROPIC_API_KEY:default-value}
       base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
       chat:
-        options:
-          model: ${ANTHROPIC_MODEL:claude-sonnet-4-0}
+        model: ${ANTHROPIC_MODEL:claude-sonnet-4-0}
 
-    vertex:
-      ai:
-        gemini:
-          chat:
-            options:
-              model: ${GEMINI_MODEL:gemini-2.0-flash}
-          project-id: ${GEMINI_PROJECT_ID:default-value}
-          location: ${GEMINI_LOCATION:us-central1}
+    google:
+      genai:
+        api-key: ${GOOGLE_GENAI_API_KEY:}
+        project-id: ${GOOGLE_GENAI_PROJECT_ID:${GEMINI_PROJECT_ID:}}
+        location: ${GOOGLE_GENAI_LOCATION:${GEMINI_LOCATION:us-central1}}
+        chat:
+          model: ${GOOGLE_GENAI_MODEL:${GEMINI_MODEL:gemini-2.5-flash}}
 
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       chat:
-        options:
-          model: ${OLLAMA_MODEL:qwen3:4b}
+        model: ${OLLAMA_MODEL:qwen3:4b}
 
   application:
     name: ai-pr-copilot
+    version: "@project.version@"
 
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI:}
+
+server:
+  tomcat:
+    threads:
+      max: ${SERVER_TOMCAT_THREADS_MAX:30}
+      min-spare: ${SERVER_TOMCAT_THREADS_MIN_SPARE:10}
+    max-http-form-post-size: 512KB
+    max-swallow-size: 512KB
+
+resilience4j:
+  bulkhead:
+    instances:
+      ai-saas:
+        maxConcurrentCalls: ${PRCOPILOT_AI_BULKHEAD_SAAS_MAX_CONCURRENT:15}
+        maxWaitDuration: ${PRCOPILOT_AI_BULKHEAD_MAX_WAIT_MILLIS:0}ms
+      ai-ollama:
+        maxConcurrentCalls: ${PRCOPILOT_AI_BULKHEAD_OLLAMA_MAX_CONCURRENT:3}
+        maxWaitDuration: ${PRCOPILOT_AI_BULKHEAD_MAX_WAIT_MILLIS:0}ms
+  ratelimiter:
+    instances:
+      api:
+        limitForPeriod: ${PRCOPILOT_RATELIMITER_LIMIT_FOR_PERIOD:30}
+        limitRefreshPeriod: ${PRCOPILOT_RATELIMITER_REFRESH_PERIOD:1m}
+        timeoutDuration: ${PRCOPILOT_RATELIMITER_TIMEOUT_MILLIS:0}ms
 
 logging:
   level:

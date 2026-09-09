@@ -1,5 +1,6 @@
 package io.github.kxng0109.aiprcopilot.config;
 
+import io.github.kxng0109.aiprcopilot.service.DiffGuardrailAdvisor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatModel;
@@ -7,12 +8,13 @@ import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.ChatOptions;
+import org.springframework.ai.google.genai.GoogleGenAiChatModel;
+import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
 import org.springframework.ai.ollama.OllamaChatModel;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
-import org.springframework.ai.vertexai.gemini.VertexAiGeminiChatModel;
-import org.springframework.ai.vertexai.gemini.VertexAiGeminiChatOptions;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,11 +23,9 @@ import org.springframework.context.annotation.Primary;
 /**
  * Configuration class for initializing AI chat clients and options.
  *
- * <p>Integrates with multiple AI providers, including OpenAI, Anthropic, Gemini, and Ollama.
- * Automatically selects and configures the primary and optional fallback clients and options
- * based on {@code MultiAiConfigurationProperties}.
- *
- * <p>This configuration requires valid properties for the desired providers to be set.
+ * <p>Integrates with multiple AI providers, including OpenAI, Anthropic, Google GenAI
+ * (Vertex mode), and Ollama. Automatically selects and configures the primary and
+ * optional fallback clients and options based on {@code MultiAiConfigurationProperties}.
  */
 @Configuration
 @Slf4j
@@ -34,16 +34,15 @@ public class AiChatClientConfig {
 
     private final MultiAiConfigurationProperties multiAiConfigurationProperties;
 
-    private final OpenAiChatModel openAiChatModel;
-    private final AnthropicChatModel anthropicChatModel;
-    private final VertexAiGeminiChatModel vertexAiGeminiChatModel;
-    private final OllamaChatModel ollamaChatModel;
+    private final ObjectProvider<OpenAiChatModel> openAiChatModel;
+    private final ObjectProvider<AnthropicChatModel> anthropicChatModel;
+    private final ObjectProvider<GoogleGenAiChatModel> googleGenAiChatModel;
+    private final ObjectProvider<OllamaChatModel> ollamaChatModel;
+
+    private final DiffGuardrailAdvisor diffGuardrailAdvisor;
 
     /**
      * Constructs the primary {@code ChatClient} based on the selected AI provider.
-     *
-     * <p>Determines the appropriate AI chat model by consulting the
-     * {@code multiAiConfigurationProperties} and builds a {@code ChatClient} instance using it.
      *
      * @return the primary {@code ChatClient} instance, never {@code null}
      */
@@ -51,30 +50,25 @@ public class AiChatClientConfig {
     @Bean
     public ChatClient primaryChatClient() {
         ChatModel primaryChatModel = chooseChatModel(multiAiConfigurationProperties.getProvider());
-        return ChatClient.builder(primaryChatModel).build();
+        return ChatClient.builder(primaryChatModel).defaultAdvisors(diffGuardrailAdvisor).build();
     }
 
     /**
-     * Constructs the primary {@code ChatOptions} based on the configured AI provider.
+     * Constructs the primary {@code ChatOptions.Builder} based on the configured AI provider.
      *
-     * <p>Determines the appropriate chat configuration for the selected provider by consulting
-     * {@code multiAiConfigurationProperties} and initializing a {@code ChatOptions} instance
-     * with the relevant parameters.
+     * <p>Spring AI 2.0 requires builders (not built instances) for
+     * {@code ChatClient.options(...)}.
      *
-     * @return the primary {@code ChatOptions} instance, never {@code null}
+     * @return the primary options builder, never {@code null}
      */
     @Primary
     @Bean
-    public ChatOptions primaryChatOptions() {
+    public ChatOptions.Builder primaryChatOptions() {
         return constructChatOption(multiAiConfigurationProperties.getProvider());
     }
 
     /**
-     * Constructs a fallback {@code ChatClient} instance based on the configured AI provider.
-     *
-     * <p>Auto-fallback mechanism ensures the availability of a {@code ChatClient} even when
-     * the primary provider is unavailable. The fallback provider must be explicitly
-     * configured via {@code multiAiConfigurationProperties}.
+     * Constructs a fallback {@code ChatClient} when auto-fallback is enabled.
      *
      * @return the fallback {@code ChatClient} instance, never {@code null}
      * @throws IllegalStateException if auto-fallback is enabled but no fallback provider is configured
@@ -82,125 +76,105 @@ public class AiChatClientConfig {
     @Bean
     @ConditionalOnProperty(name = "prcopilot.ai.auto-fallback", havingValue = "true")
     public ChatClient fallbackChatClient() {
-        if (multiAiConfigurationProperties.getFallbackProvider() == null) {
-            throw new IllegalStateException(
-                    "Auto-fallback is enabled but no fallback provider is configured. Please set PRCOPILOT_AI_FALLBACK_PROVIDER or disable auto-fallback."
-            );
-        }
-
-        ChatModel fallBackChatModel = chooseChatModel(multiAiConfigurationProperties.getFallbackProvider());
-        return ChatClient.builder(fallBackChatModel).build();
+        ChatModel fallBackChatModel =
+                chooseChatModel(ProviderSupport.requireFallbackProvider(multiAiConfigurationProperties.getFallbackProvider()));
+        return ChatClient.builder(fallBackChatModel).defaultAdvisors(diffGuardrailAdvisor).build();
     }
 
     /**
-     * Constructs a fallback {@code ChatOptions} instance based on the configured AI provider.
+     * Constructs fallback options when auto-fallback is enabled.
      *
-     * <p>Creates a {@code ChatOptions} instance if the auto fallback mechanism is enabled and
-     * a fallback provider is specified in {@code multiAiConfigurationProperties}.
-     *
-     * @return the fallback {@code ChatOptions} instance, never {@code null}
+     * @return the fallback options builder, never {@code null}
      * @throws IllegalStateException if auto fallback is enabled but no fallback provider is configured
      */
     @Bean
     @ConditionalOnProperty(name = "prcopilot.ai.auto-fallback", havingValue = "true")
-    public ChatOptions fallbackChatOptions() {
-        if (multiAiConfigurationProperties.getFallbackProvider() == null) {
-            throw new IllegalStateException(
-                    "Auto-fallback is enabled but no fallback provider is configured. Please set PRCOPILOT_AI_FALLBACK_PROVIDER or disable auto-fallback."
-            );
-        }
-
-        return constructChatOption(multiAiConfigurationProperties.getFallbackProvider());
+    public ChatOptions.Builder fallbackChatOptions() {
+        return constructChatOption(
+                ProviderSupport.requireFallbackProvider(multiAiConfigurationProperties.getFallbackProvider()));
     }
 
-
     /**
-     * Determines the appropriate chat model based on the specified AI provider.
+     * Selects the auto-configured chat model for the given provider.
      *
-     * @param provider the {@code AiProvider} indicating which chat model to select; must not be {@code null}
-     * @return the corresponding {@code ChatModel} for the specified {@code provider}, never {@code null}
-     * @throws IllegalArgumentException if the specified {@code provider} is unsupported or
-     *                                  if the corresponding chat model is not properly configured
+     * @param provider the {@code AiProvider} to select; must not be {@code null}
+     * @return the corresponding {@code ChatModel}, never {@code null}
+     * @throws IllegalArgumentException if the provider is not configured
      */
     private ChatModel chooseChatModel(AiProvider provider) {
         return switch (provider) {
             case OPENAI -> {
-                if (openAiChatModel == null) {
+                OpenAiChatModel model = openAiChatModel.getIfAvailable();
+                if (model == null) {
                     throw new IllegalArgumentException(
                             "OpenAI provider is selected but not configured. Set OPENAI_API_KEY." +
                                     "Check .env.example for more details."
                     );
                 }
 
-                yield openAiChatModel;
+                yield model;
             }
 
             case ANTHROPIC -> {
-                if (anthropicChatModel == null) {
+                AnthropicChatModel model = anthropicChatModel.getIfAvailable();
+                if (model == null) {
                     throw new IllegalArgumentException(
                             "Anthropic provider is selected but not configured. Set ANTHROPIC_API_KEY." +
                                     "Check .env.example for more details."
                     );
                 }
 
-                yield anthropicChatModel;
+                yield model;
             }
 
             case GEMINI -> {
-                if (vertexAiGeminiChatModel == null) {
+                GoogleGenAiChatModel model = googleGenAiChatModel.getIfAvailable();
+                if (model == null) {
                     throw new IllegalArgumentException(
-                            "Gemini provider is selected but not configured. Set up GCP credentials." +
+                            "Gemini provider is selected but not configured. Set GOOGLE_GENAI_PROJECT_ID/LOCATION with ADC, or GOOGLE_GENAI_API_KEY for prototyping." +
                                     "Check .env.example for more details."
                     );
                 }
 
-                yield vertexAiGeminiChatModel;
+                yield model;
             }
 
             case OLLAMA -> {
-                if (ollamaChatModel == null) {
+                OllamaChatModel model = ollamaChatModel.getIfAvailable();
+                if (model == null) {
                     throw new IllegalArgumentException(
                             "Ollama provider is selected but not configured. Set up OLLAMA_MODEL and ensure Ollama is running." +
                                     "Check .env.example for more details.");
                 }
 
-                yield ollamaChatModel;
+                yield model;
             }
         };
     }
 
     /**
-     * Constructs a {@code ChatOptions} instance configured for the specified {@code AiProvider}.
+     * Builds provider-specific options as a {@link ChatOptions.Builder}.
      *
-     * <p>Determines the appropriate options for the given provider by utilizing
-     * {@code multiAiConfigurationProperties} to configure parameters such as temperature
-     * and token limits.
-     *
-     * @param provider the {@code AiProvider} for which the chat options are to be created; must not be {@code null}
-     * @return a {@code ChatOptions} instance configured for the given {@code provider}, never {@code null}
-     * @throws IllegalArgumentException if the specified {@code provider} is unsupported
+     * @param provider the {@code AiProvider} to build options for; must not be {@code null}
+     * @return an options builder, never {@code null}
      */
-    private ChatOptions constructChatOption(AiProvider provider) {
+    private ChatOptions.Builder constructChatOption(AiProvider provider) {
         return switch (provider) {
             case OPENAI -> OpenAiChatOptions.builder()
                                             .temperature(multiAiConfigurationProperties.getTemperature())
-                                            .maxTokens(multiAiConfigurationProperties.getMaxTokens())
-                                            .build();
+                                            .maxTokens(multiAiConfigurationProperties.getMaxTokens());
 
             case ANTHROPIC -> AnthropicChatOptions.builder()
                                                   .temperature(multiAiConfigurationProperties.getTemperature())
-                                                  .maxTokens(multiAiConfigurationProperties.getMaxTokens())
-                                                  .build();
+                                                  .maxTokens(multiAiConfigurationProperties.getMaxTokens());
 
-            case GEMINI -> VertexAiGeminiChatOptions.builder()
-                                                    .temperature(multiAiConfigurationProperties.getTemperature())
-                                                    .maxOutputTokens(multiAiConfigurationProperties.getMaxTokens())
-                                                    .build();
+            case GEMINI -> GoogleGenAiChatOptions.builder()
+                                                 .temperature(multiAiConfigurationProperties.getTemperature())
+                                                 .maxOutputTokens(multiAiConfigurationProperties.getMaxTokens());
 
             case OLLAMA -> OllamaChatOptions.builder()
                                             .temperature(multiAiConfigurationProperties.getTemperature())
-                                            .numPredict(multiAiConfigurationProperties.getMaxTokens())
-                                            .build();
+                                            .numPredict(multiAiConfigurationProperties.getMaxTokens());
         };
     }
 }

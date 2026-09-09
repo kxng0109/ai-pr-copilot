@@ -1,17 +1,18 @@
 package io.github.kxng0109.aiprcopilot.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.kxng0109.aiprcopilot.config.PrCopilotAnalysisProperties;
 import io.github.kxng0109.aiprcopilot.config.PrCopilotLoggingProperties;
 import io.github.kxng0109.aiprcopilot.api.dto.AiCallMetadata;
 import io.github.kxng0109.aiprcopilot.api.dto.AnalyzeDiffResponse;
 import io.github.kxng0109.aiprcopilot.api.dto.ModelAnalyzeDiffResult;
+import io.github.kxng0109.aiprcopilot.api.dto.RiskItem;
 import io.github.kxng0109.aiprcopilot.error.ModelOutputParseException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -57,13 +58,22 @@ class DiffResponseMapperService {
             String provider
     ) {
         String modelOutput = extractModelOutputText(response);
-        log.debug("AI model raw output: {}", modelOutput);
+        if (modelOutput.length() > analysisProperties.getMaxModelOutputChars()) {
+            throw new ModelOutputParseException(
+                    "Model output exceeded maximum allowed size of "
+                            + analysisProperties.getMaxModelOutputChars() + " characters");
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("AI model raw output: {} chars", modelOutput.length());
+        }
         String cleanedModelOutput = sanitizeModelOutput(modelOutput);
-        log.debug("AI model cleaned output: {}", cleanedModelOutput);
+        if (log.isDebugEnabled()) {
+            log.debug("AI model cleaned output: {} chars", cleanedModelOutput.length());
+        }
 
         try {
             ModelAnalyzeDiffResult aiResult = objectMapper.readValue(cleanedModelOutput, ModelAnalyzeDiffResult.class);
-            log.debug("AI model analysis result: {}", aiResult);
+            log.debug("AI model analysis result parsed");
 
             if (aiResult == null) {
                 throw new ModelOutputParseException("Parsed model output is null. Expected non-null, valid JSON DTO.");
@@ -72,10 +82,16 @@ class DiffResponseMapperService {
             if (aiResult.title() == null || aiResult.summary() == null || aiResult.details() == null
                     || aiResult.risks() == null || aiResult.suggestedTests() == null) {
                 throw new ModelOutputParseException(
-                        "Parsed model output is missing required fields. Output: " + cleanedModelOutput);
+                        "Parsed model output is missing required fields. Output preview: "
+                                + cleanedModelOutput.substring(0, Math.min(cleanedModelOutput.length(), 500)));
             }
 
-            if (loggingProperties.isLogResponses()) log.info(aiResult.toString());
+            List<RiskItem> risks = normalizeRisks(aiResult.risks());
+
+            if (loggingProperties.isLogResponses() && log.isInfoEnabled()) {
+                log.info("AI analysis complete for requestId {} (title chars={}, risks={})", requestId,
+                         aiResult.title() == null ? 0 : aiResult.title().length(), risks.size());
+            }
 
             String model = response.getMetadata().getModel();
             Integer tokensUsed = (response.getMetadata().getUsage() != null && response.getMetadata().getUsage().getTotalTokens() != null)
@@ -95,7 +111,8 @@ class DiffResponseMapperService {
 
             return AnalyzeDiffResponse.builder()
                                       .title(aiResult.title())
-                                      .risks(aiResult.risks())
+                                      .risks(risks)
+                                      .riskScore(riskScore(risks))
                                       .summary(aiResult.summary())
                                       .suggestedTests(aiResult.suggestedTests())
                                       .details(aiResult.details())
@@ -110,10 +127,10 @@ class DiffResponseMapperService {
                                       .requestId(requestId)
                                       .build();
 
-        } catch (JsonProcessingException e) {
-            log.warn("JSON parsing failed for model output: {}", e.getOriginalMessage());
+        } catch (JacksonException e) {
+            log.warn("JSON parsing failed for model output: {}", e.getMessage());
             throw new ModelOutputParseException("Model returned invalid JSON output. " +
-                                                        "Error details: " + e.getOriginalMessage());
+                                                        "Error details: " + e.getMessage());
         } catch (ModelOutputParseException e) {
             throw e;
         }
@@ -122,8 +139,47 @@ class DiffResponseMapperService {
         }
     }
 
-    private String extractModelOutputText(ChatResponse response) {
-        String aiRawResponse = null;
+    /**
+     * Validates and normalizes model-provided risks onto the contract levels.
+     *
+     * @param risks raw risks; must not be {@code null} (null is a missing-field error)
+     * @return normalized risks, never {@code null}
+     * @throws ModelOutputParseException on blank messages or unrecognized levels
+     */
+    private List<RiskItem> normalizeRisks(List<RiskItem> risks) {
+        if (risks == null) {
+            throw new ModelOutputParseException("Parsed model output is missing required field: risks.");
+        }
+        try {
+            return risks.stream()
+                    .map(r -> {
+                        if (r == null || r.message() == null || r.message().isBlank()) {
+                            throw new IllegalArgumentException("Risk message must not be blank");
+                        }
+                        return new RiskItem(RiskItem.normalizeLevel(r.level()), r.message().trim());
+                    })
+                    .toList();
+        } catch (IllegalArgumentException e) {
+            throw new ModelOutputParseException("Invalid risk entry: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Deterministic 0-100 score: error=25, warning=10, note=2, capped at 100.
+     */
+    static int riskScore(List<RiskItem> risks) {
+        int score = 0;
+        for (RiskItem risk : risks) {
+            score += switch (risk.level()) {
+                case "error" -> 25;
+                case "warning" -> 10;
+                default -> 2;
+            };
+        }
+        return Math.min(score, 100);
+    }
+
+    private String extractModelOutputText(ChatResponse response) {        String aiRawResponse = null;
 
         try {
             aiRawResponse = response.getResult().getOutput().getText();

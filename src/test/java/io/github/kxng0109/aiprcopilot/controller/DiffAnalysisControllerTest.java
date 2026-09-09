@@ -1,18 +1,20 @@
 package io.github.kxng0109.aiprcopilot.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.kxng0109.aiprcopilot.api.dto.AiCallMetadata;
 import io.github.kxng0109.aiprcopilot.api.dto.AnalyzeDiffRequest;
 import io.github.kxng0109.aiprcopilot.api.dto.AnalyzeDiffResponse;
 import io.github.kxng0109.aiprcopilot.error.DiffTooLargeException;
 import io.github.kxng0109.aiprcopilot.service.DiffAnalysisService;
+import io.github.kxng0109.aiprcopilot.service.SarifService;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 
@@ -22,9 +24,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(DiffAnalysisController.class)
+@AutoConfigureMockMvc(addFilters = false)
 public class DiffAnalysisControllerTest {
     @MockitoBean
     private DiffAnalysisService diffAnalysisService;
+
+    @MockitoBean
+    private SarifService sarifService;
 
     @Autowired
     private MockMvc mockMvc;
@@ -189,5 +195,56 @@ public class DiffAnalysisControllerTest {
                .andExpect(jsonPath("$.path").value("/api/v1/analyze-diff"));
 
         verify(diffAnalysisService).analyzeDiff(any(AnalyzeDiffRequest.class));
+    }
+
+    @Test
+    public void analyzeDiffSarif_shouldReturnSarifDocument() throws Exception {
+        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+                                                        .diff("x")
+                                                        .maxSummaryLength(1024)
+                                                        .requestId("req-1")
+                                                        .build();
+
+        AnalyzeDiffResponse analysis = AnalyzeDiffResponse.builder()
+                                                          .title("t")
+                                                          .summary("s")
+                                                          .risks(List.of())
+                                                          .riskScore(0)
+                                                          .requestId("req-1")
+                                                          .build();
+
+        when(diffAnalysisService.analyzeDiff(any(AnalyzeDiffRequest.class))).thenReturn(analysis);
+        when(sarifService.toSarif(analysis)).thenReturn(java.util.Map.of("version", "2.1.0"));
+
+        mockMvc.perform(post("/api/v1/analyze-diff/sarif")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.version").value("2.1.0"));
+
+        verify(diffAnalysisService).analyzeDiff(any(AnalyzeDiffRequest.class));
+        verify(sarifService).toSarif(analysis);
+    }
+
+    @Test
+    public void analyzeDiffStream_shouldReturnEventStream() throws Exception {
+        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+                                                        .diff("x")
+                                                        .maxSummaryLength(1024)
+                                                        .requestId("req-1")
+                                                        .build();
+
+        org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter =
+                new org.springframework.web.servlet.mvc.method.annotation.SseEmitter();
+        emitter.complete();
+
+        when(diffAnalysisService.streamAnalyze(any(AnalyzeDiffRequest.class))).thenReturn(emitter);
+
+        mockMvc.perform(post("/api/v1/analyze-diff/stream")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk());
+
+        verify(diffAnalysisService).streamAnalyze(any(AnalyzeDiffRequest.class));
     }
 }

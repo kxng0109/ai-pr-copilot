@@ -4,7 +4,7 @@ import io.github.kxng0109.aiprcopilot.error.CustomApiException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.boot.context.event.ApplicationStartedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -22,14 +22,23 @@ class AppStartupCheck {
     @Value("${spring.ai.anthropic.api-key:}")
     private String anthropicApiKey;
 
-    @Value("${spring.ai.vertex.ai.gemini.project-id:}")
-    private String vertexAiProjectId;
+    @Value("${spring.ai.google.genai.project-id:}")
+    private String googleGenAiProjectId;
+
+    @Value("${spring.ai.google.genai.location:}")
+    private String googleGenAiLocation;
+
+    @Value("${spring.ai.google.genai.api-key:}")
+    private String googleGenAiApiKey;
 
     @Value("${spring.ai.ollama.base-url:}")
     private String ollamaBaseUrl;
 
-    @Value("${spring.ai.ollama.chat.options.model:}")
+    @Value("${spring.ai.ollama.chat.model:}")
     private String ollamaChatModel;
+
+    @Value("${app.skip-startup-check:false}")
+    private boolean skipStartupCheck;
 
     /**
      * Validates the AI provider configuration during application startup.
@@ -45,21 +54,20 @@ class AppStartupCheck {
      * @throws RuntimeException if auto-fallback is enabled but the fallback provider
      *                          is not configured or improperly set
      */
-    @EventListener(ApplicationReadyEvent.class)
+    @EventListener(ApplicationStartedEvent.class)
     public void validateConfiguration() {
+        if(skipStartupCheck){
+            log.debug("Startup checks skipped");
+            return;
+        }
+
         AiProvider primaryProvider = multiAiConfigurationProperties.getProvider();
 
         validateProvider(primaryProvider);
 
         if (multiAiConfigurationProperties.isAutoFallback()) {
-            if (multiAiConfigurationProperties.getFallbackProvider() == null) {
-                String errorMessage = "Auto-fallback is enabled but fallback provider is not set/configured. Either set fallback provider or disable auto-fallback. \nCheck .env.example for more info";
-                log.error(errorMessage);
-
-                throw new RuntimeException(errorMessage);
-            }
-
-            AiProvider fallbackProvider = multiAiConfigurationProperties.getFallbackProvider();
+            AiProvider fallbackProvider = ProviderSupport.requireFallbackProvider(
+                    multiAiConfigurationProperties.getFallbackProvider());
             if (fallbackProvider == primaryProvider) {
                 log.warn("Fallback provider is the same as your primary provider, is that intentional?");
             }
@@ -113,16 +121,20 @@ class AppStartupCheck {
             }
 
             case GEMINI -> {
-                if (isMissing(vertexAiProjectId)) {
-                    String errorMessage = "Configured failed for provider Gemini. GEMINI_PROJECT_ID is not configured. Set GEMINI_PROJECT_ID. \nCheck .env.example for more info";
+                // Vertex mode (production): project-id + location + ADC.
+                // API-key mode is prototyping only and rejected for production diffs.
+                if (!isMissing(googleGenAiProjectId) && !isMissing(googleGenAiLocation)) {
+                    log.info("Provider '{}' successfully configured (Vertex mode).", provider);
+                } else if (!isMissing(googleGenAiApiKey)) {
+                    log.warn("Provider '{}' uses Developer API key mode (prototyping only, no residency/ZDR guarantees).", provider);
+                } else {
+                    String errorMessage = "Configured failed for provider Gemini. Set GOOGLE_GENAI_PROJECT_ID and GOOGLE_GENAI_LOCATION (Vertex mode), or GOOGLE_GENAI_API_KEY for prototyping. \nCheck .env.example for more info";
 
                     log.error(errorMessage);
                     throw new CustomApiException(errorMessage,
                                                  HttpStatus.INTERNAL_SERVER_ERROR
                     );
                 }
-
-                log.info("Provider '{}' successfully configured.", provider);
             }
 
             case OLLAMA -> {
@@ -148,6 +160,6 @@ class AppStartupCheck {
      * @return {@code true} if the string is unavailable, {@code false} otherwise
      */
     private boolean isMissing(String stuff) {
-        return stuff == null || stuff.isBlank() || stuff.trim().isEmpty() || stuff.equals("default-value");
+        return stuff == null || stuff.isBlank() || stuff.equals("default-value");
     }
 }
