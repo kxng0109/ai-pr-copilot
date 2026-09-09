@@ -1,7 +1,7 @@
 # ============================================
 # Build Stage (pinned Temurin 25 LTS)
 # ============================================
-FROM eclipse-temurin:25.0.4_1-jdk-alpine AS builder
+FROM eclipse-temurin:26.0.2_10-jdk-alpine AS builder
 
 WORKDIR /build
 
@@ -32,7 +32,7 @@ RUN java -Djarmode=tools -jar target/ai-pr-copilot-*.jar extract --layers --dest
 # ============================================
 # Runtime Stage
 # ============================================
-FROM eclipse-temurin:25.0.4_1-jre-alpine
+FROM eclipse-temurin:26.0.2_10-jre-alpine
 
 LABEL org.opencontainers.image.title="AI PR Copilot"
 LABEL org.opencontainers.image.description="Self-hosted AI-powered code audit and PR analysis service"
