@@ -52,6 +52,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Record date for Trivy cache key
+        id: date
+        run: echo "date=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Trivy DB cache
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v4
+        with:
+          path: ${{ github.workspace }}/.cache/trivy
+          key: cache-trivy-${{ steps.date.outputs.date }}
+          restore-keys: |
+            cache-trivy-
+
+      - name: Configure Trivy skip flags
+        # TRIVY_SKIP_JAVA_DB_UPDATE is fatal when the cache does not exist
+        # ("cannot be specified on the first run"), so only enable skipping
+        # once the warm job has actually populated the DBs.
+        run: |
+          if [ -d "${GITHUB_WORKSPACE}/.cache/trivy/db" ] && [ -d "${GITHUB_WORKSPACE}/.cache/trivy/java-db" ]; then
+            echo "TRIVY_SKIP_DB_UPDATE=true" >> "$GITHUB_ENV"
+            echo "TRIVY_SKIP_JAVA_DB_UPDATE=true" >> "$GITHUB_ENV"
+            echo "Trivy DBs cached; skipping download"
+          else
+            echo "Trivy cache not present; allowing DB download"
+          fi
+
       - name: Download built artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
