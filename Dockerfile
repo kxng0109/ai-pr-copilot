@@ -37,7 +37,7 @@ FROM eclipse-temurin:25.0.4_1-jre-alpine
 LABEL org.opencontainers.image.title="AI PR Copilot"
 LABEL org.opencontainers.image.description="Self-hosted AI-powered code audit and PR analysis service"
 LABEL org.opencontainers.image.vendor="kxng0109"
-ARG APP_VERSION=1.0.0-rc.1
+ARG APP_VERSION=1.0.0-rc.2
 LABEL org.opencontainers.image.version="${APP_VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/kxng0109/ai-pr-copilot"
 
