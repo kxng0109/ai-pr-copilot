@@ -42,7 +42,7 @@ FROM eclipse-temurin@sha256:3137541deb3cac6626b5d9a4a2187bc0d6a34312f858bd2c67dd
 LABEL org.opencontainers.image.title="AI PR Copilot"
 LABEL org.opencontainers.image.description="Self-hosted AI-powered code audit and PR analysis service"
 LABEL org.opencontainers.image.vendor="kxng0109"
-ARG APP_VERSION=1.0.0-rc.6
+ARG APP_VERSION=1.0.0-rc.7
 LABEL org.opencontainers.image.version="${APP_VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/kxng0109/ai-pr-copilot"
 
