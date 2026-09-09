@@ -10,7 +10,7 @@ public final class AppInfo {
 
     public static final String NAME = "ai-pr-copilot";
 
-    public static final String VERSION = "1.0.0-rc.7";
+    public static final String VERSION = "1.0.0-rc.8";
 
     private AppInfo() {}
 }
