@@ -189,8 +189,12 @@ jobs:
       - name: Smoke test (actuator health with dummy key)
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
+          # Spring AI's chat auto-config is gated on spring.ai.model.chat,
+          # which application.yml leaves empty so the runtime provider can
+          # override it. Without this the OpenAI bean is never created and
+          # the context fails to start, so set it explicitly for the smoke run.
           OPENAI_API_KEY=dummy-smoke-key PRCOPILOT_API_KEY=dummy-smoke-key \
-          GOOGLE_GENAI_PROJECT_ID=dummy-smoke-project GOOGLE_GENAI_LOCATION=us-central1 \
+          SPRING_AI_MODEL_CHAT=openai GOOGLE_GENAI_PROJECT_ID=dummy-smoke-project GOOGLE_GENAI_LOCATION=us-central1 \
             java -jar "target/ai-pr-copilot-${VERSION}.jar" > smoke.log 2>&1 &
           PID=$!
           for i in $(seq 1 60); do
