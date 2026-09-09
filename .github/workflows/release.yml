@@ -12,7 +12,7 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-permissions: {}
+permissions: { }
 
 jobs:
   validate:
@@ -29,24 +29,34 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up JDK 25
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: maven
+
       - name: Validate tag matches pom and derive flags
         id: version
         run: |
           TAGV="${GITHUB_REF_NAME#v}"
-          if ! echo "$TAGV" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(rc|beta|alpha|preview)[.0-9-]*)?$'; then
+          if ! echo "$TAGV" | grep -Eq -- '^[0-9]+\.[0-9]+\.[0-9]+(-(rc|beta|alpha|preview)[.0-9-]*)?$'; then
             echo "Tag $GITHUB_REF_NAME is not valid SemVer"; exit 1
           fi
-          POMV=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
+          POMV=$(bash ./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
           if [ "$TAGV" != "$POMV" ]; then
             echo "tag $TAGV != pom $POMV"; exit 1
           fi
-          if echo "$TAGV" | grep -Eq '-(rc|beta|alpha|preview)'; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "make-latest=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "make-latest=true" >> "$GITHUB_OUTPUT"
-          fi
+          case "$TAGV" in
+            *-rc*|*-beta*|*-alpha*|*-preview*)
+              echo "prerelease=true" >> "$GITHUB_OUTPUT"
+              echo "make-latest=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "prerelease=false" >> "$GITHUB_OUTPUT"
+              echo "make-latest=true" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
           echo "version=$TAGV" >> "$GITHUB_OUTPUT"
           echo "Releasing version: $TAGV"
 
@@ -60,14 +70,14 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up JDK 25
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           java-version: '25'
           distribution: 'temurin'
           cache: maven
 
       - name: Build and run tests
-        run: ./mvnw -B verify
+        run: bash ./mvnw -B verify
 
   trivy-fs:
     needs: validate
@@ -78,6 +88,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Pre-populate Maven cache (avoid Trivy 429 on Maven Central)
+        run: bash ./mvnw -B -q dependency:go-offline
 
       - name: Trivy filesystem gate (HIGH/CRITICAL block)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -99,7 +119,7 @@ jobs:
           sarif_file: trivy-fs.sarif
 
   build:
-    needs: [validate, test, trivy-fs]
+    needs: [ validate, test, trivy-fs ]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -108,20 +128,22 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up JDK 25
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           java-version: '25'
           distribution: 'temurin'
           cache: maven
 
       - name: Package (tests already green in test job)
-        run: ./mvnw -B -DskipTests package
+        run: bash ./mvnw -B -DskipTests package
 
       - name: Rename artifacts deterministically
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
           mv target/ai-pr-copilot-*.jar "target/ai-pr-copilot-${VERSION}.jar"
           cp target/classes/META-INF/sbom/application.cdx.json "target/ai-pr-copilot-${VERSION}-cyclonedx.json"
+          cp target/bom.json "target/ai-pr-copilot-${VERSION}-cyclonedx-aggregate.json" 2>/dev/null || echo "WARN: target/bom.json not found"
+          cp target/bom.xml "target/ai-pr-copilot-${VERSION}-cyclonedx-aggregate.xml" 2>/dev/null || echo "WARN: target/bom.xml not found"
           cd target
           sha256sum "ai-pr-copilot-${VERSION}.jar" > "ai-pr-copilot-${VERSION}.jar.sha256"
           sha256sum -c "ai-pr-copilot-${VERSION}.jar.sha256"
@@ -149,11 +171,13 @@ jobs:
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}.jar
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}.jar.sha256
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}-cyclonedx.json
+            target/ai-pr-copilot-${{ needs.validate.outputs.version }}-cyclonedx-aggregate.json
+            target/ai-pr-copilot-${{ needs.validate.outputs.version }}-cyclonedx-aggregate.xml
           if-no-files-found: error
           retention-days: 7
 
   docker:
-    needs: [validate, build]
+    needs: [ validate, build ]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -210,7 +234,7 @@ jobs:
           exit-code: '1'
 
   sign-attest:
-    needs: [validate, build, docker]
+    needs: [ validate, build, docker ]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -277,7 +301,7 @@ jobs:
           retention-days: 7
 
   release:
-    needs: [validate, build, docker, sign-attest]
+    needs: [ validate, build, docker, sign-attest ]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -343,6 +367,8 @@ jobs:
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}.jar
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}.jar.sha256
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}-cyclonedx.json
+            target/ai-pr-copilot-${{ needs.validate.outputs.version }}-cyclonedx-aggregate.json
+            target/ai-pr-copilot-${{ needs.validate.outputs.version }}-cyclonedx-aggregate.xml
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}-image.sbom.cyclonedx.json
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}.jar.sigstore.json
             target/ai-pr-copilot-${{ needs.validate.outputs.version }}.attestation.sigstore.json
