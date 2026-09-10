@@ -45,8 +45,10 @@ commit_parsers = [
     { body = ".*security", group = "<!-- 8 -->Security" },
 ]
 filter_commits = false
-tag_pattern = "v[0-9]*"
-ignore_tags = "(v[0-9]+\\.[0-9]+\\.[0-9]+-rc.*|v[0-9]+\\.[0-9]+\\.[0-9]+-(beta|alpha|preview).*)"
+# Match both stable (v1.0.0) and prerelease (v1.0.0-rc.N) tags. The old
+# pattern "v[0-9]*" matched no dotted SemVer tag, which made git-cliff
+# fail with "No suitable tags found" on the first stable release.
+tag_pattern = "v[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9.]+)?"
 topo_order = true
 sort_commits = "oldest"
 limit_commits = 200
