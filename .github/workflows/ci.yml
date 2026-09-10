@@ -95,3 +95,49 @@ jobs:
           ignore-unfixed: true
           format: table
           exit-code: '1'
+
+  security-eval:
+    # Run on pull requests only, not on pushes to main, so the common
+    # path stays fast. The JUnit test itself is the gate: it asserts
+    # regression-vs-pinned-baseline, so a documented gap stays green while
+    # a real regression fails the job.
+    if: github.event_name == 'pull_request'
+    needs: build-and-test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Run adversarial security eval
+        run: bash ./mvnw -B test -Dtest=GuardrailEvalTest
+
+      - name: Publish eval summary
+        if: always()
+        run: |
+          if [ -f target/security-eval.json ]; then
+            echo "## Security eval results" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat target/security-eval.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Security eval: no report produced" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: security-eval-report
+          path: target/security-eval.json
+          if-no-files-found: warn
+          retention-days: 1

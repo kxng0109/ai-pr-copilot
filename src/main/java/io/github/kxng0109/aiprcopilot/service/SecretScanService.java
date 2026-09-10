@@ -1,6 +1,7 @@
 package io.github.kxng0109.aiprcopilot.service;
 
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -53,7 +54,67 @@ public class SecretScanService {
             "(?i)(password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token|private[_-]?key|client[_-]?secret)"
                     + "\\s*[:=]\\s*[\"']?([^\"'\\s]{20,200})[\"']?");
 
+/**
+     * Returns detection views of the text with common obfuscation removed:
+     * zero-width characters stripped, ROT13 applied, and base64 substrings
+     * unwrapped. Each transform is applied to the ORIGINAL text and the
+     * views are concatenated — chaining them (e.g. rot13 after a
+     * zero-width strip) would mangle a recovered token and re-hide it.
+     *
+     * <p>These views are used ONLY to decide the verdict. The original text
+     * is always what gets returned to the caller, so decoding can never
+     * expose a secret that was not already present in the input.
+     */
+    private String normalizeForDetection(String text) {
+        StringBuilder views = new StringBuilder(text);
+        views.append("\n").append(ZERO_WIDTH.matcher(text).replaceAll(""));
+        views.append("\n").append(rot13(text));
+        Matcher m = BASE64_CANDIDATE.matcher(text);
+        StringBuilder decoded = new StringBuilder();
+        while (m.find()) {
+            String d = tryBase64(m.group(0));
+            if (d != null) {
+                decoded.append(d).append(' ');
+            }
+        }
+        if (decoded.length() > 0) {
+            views.append("\n").append(decoded);
+        }
+        return views.toString();
+    }
+
+    private static final Pattern ZERO_WIDTH = Pattern.compile("[\\u200B-\\u200F\\uFEFF\\u202A-\\u202E]");
+
     private static final Pattern BASE64ISH = Pattern.compile("^[A-Za-z0-9+/=_\\-.]{20,200}$");
+
+    private static final Pattern BASE64_CANDIDATE = Pattern.compile("[A-Za-z0-9+/=_\\-.]{16,200}");
+
+    private static String rot13(String s) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= 'a' && c <= 'z') c = (char) ((c - 'a' + 13) % 26 + 'a');
+            else if (c >= 'A' && c <= 'Z') c = (char) ((c - 'A' + 13) % 26 + 'A');
+            out.append(c);
+        }
+        return out.toString();
+    }
+
+    private static String tryBase64(String s) {
+        try {
+            byte[] decoded = Base64.getDecoder().decode(s);
+            String asText = new String(decoded, java.nio.charset.StandardCharsets.UTF_8);
+            // Only accept a decode that yields printable, token-shaped text.
+            if (TOKENISH.matcher(asText).find()) {
+                return asText;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Not valid base64; leave the substring alone.
+        }
+        return null;
+    }
+
+    private static final Pattern TOKENISH = Pattern.compile("[A-Za-z0-9_\\-]{8,}");
 
     private static final List<Pattern> PII_PATTERNS = List.of(
             Pattern.compile("[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}"),
@@ -79,8 +140,12 @@ public class SecretScanService {
             if (text == null || text.isEmpty()) {
                 return new ScanResult(Verdict.CLEAN, text == null ? "" : text, null);
             }
+            // Detection runs against the original text plus a de-obfuscated view,
+            // so disguised tokens are caught without mangling legitimate ones
+            // (ROT13 of the whole string would break real 'sk-ant-...' keys).
+            String detectionText = text + "\n" + normalizeForDetection(text);
             for (BlockRule blockRule : BLOCK_RULES) {
-                if (blockRule.pattern().matcher(text).find()) {
+                if (blockRule.pattern().matcher(detectionText).find()) {
                     log.warn("Secret scan BLOCKED (rule={})", blockRule.name());
                     return new ScanResult(Verdict.BLOCKED, "",
                             "Blocked: suspected " + blockRule.name() + " in diff. Remove the secret and retry.");

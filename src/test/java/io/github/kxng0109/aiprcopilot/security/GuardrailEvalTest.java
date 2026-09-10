@@ -39,10 +39,12 @@ class GuardrailEvalTest {
             java.nio.file.Paths.get("target/security-eval.json");
 
     /** Pinned baselines, NOT targets. Bump deliberately after a defense
-     *  change and record why in the commit message. */
+     *  change and record why in the commit message. Obfuscation moved
+     *  0/3 -> 3/3 when the scanner learned to un-strip zero-width,
+     *  ROT13 and base64 before matching. */
     private static final Map<String, int[]> BASELINE = Map.of(
             "secret-scan", new int[]{6, 7},
-            "obfuscation", new int[]{0, 3},
+            "obfuscation", new int[]{3, 3},
             "injection", new int[]{3, 5}
     );
 

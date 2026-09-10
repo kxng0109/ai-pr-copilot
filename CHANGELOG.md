@@ -16,6 +16,16 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 - k6 load/SLO script (`k6/load.js`) with smoke, load, and stress scenarios
   capturing p50/p95/p99 latency and SSE time-to-first-byte
 
+### Security
+
+- Secret scanner now detects obfuscated secrets (base64, ROT13, and
+  zero-width-character variants), closing a bypass where disguised tokens
+  were previously missed. Detection views are derived from the original
+  text only, so decoding can never expose a secret.
+- Adversarial security evaluation now runs automatically on pull requests
+  via the `security-eval` CI job, failing on a real regression while
+  allowing a documented, pinned gap to stay green.
+
 ## [1.0.0] - 2026-09-10
 
 ### Features
