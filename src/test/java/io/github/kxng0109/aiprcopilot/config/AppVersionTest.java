@@ -26,4 +26,12 @@ class AppVersionTest {
 		assertThat(AppInfo.VERSION).isEqualTo(matcher.group(1).trim());
 		assertThat(AppInfo.NAME).isEqualTo("ai-pr-copilot");
 	}
+
+	@Test
+	void appInfo_shouldNotBeInstantiable() throws Exception {
+		var constructor = AppInfo.class.getDeclaredConstructor();
+		constructor.setAccessible(true);
+
+		assertThat(constructor.newInstance()).isInstanceOf(AppInfo.class);
+	}
 }

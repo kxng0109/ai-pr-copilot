@@ -28,7 +28,7 @@ import java.util.Map;
 public class GlobalExceptionHandler {
 
 	/**
-	 * Handles {@code DiffTooLargeException} with HTTP 413 (Payload Too Large).
+	 * Handles {@code DiffTooLargeException} with HTTP 413 (Content Too Large).
 	 *
 	 * @param ex      the exception that occurred, must not be {@code null}
 	 * @param request the HTTP request that caused the exception, must not be {@code null}
@@ -38,7 +38,7 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ErrorResponse> handleDiffTooLargeException(DiffTooLargeException ex,
 	                                                                 HttpServletRequest request
 	) {
-		return build(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), request);
+		return build(HttpStatus.CONTENT_TOO_LARGE, ex.getMessage(), request);
 	}
 
 	/**
@@ -129,7 +129,7 @@ public class GlobalExceptionHandler {
 	}
 
 	/**
-	 * Handles {@code ModelOutputParseException} with HTTP 422 (Unprocessable Entity).
+	 * Handles {@code ModelOutputParseException} with HTTP 422 (Unprocessable Content).
 	 *
 	 * @param ex      the exception that occurred, must not be {@code null}
 	 * @param request the HTTP request that caused the exception, must not be {@code null}
@@ -140,7 +140,7 @@ public class GlobalExceptionHandler {
 			ModelOutputParseException ex,
 			HttpServletRequest request
 	) {
-		return build(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage(), request);
+		return build(HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage(), request);
 	}
 
 	/**

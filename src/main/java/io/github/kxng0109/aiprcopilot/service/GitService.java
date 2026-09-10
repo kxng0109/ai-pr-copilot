@@ -37,8 +37,18 @@ public class GitService {
 
 
 	private static String detectWorkingDirectory() {
+		return resolveWorkingDirectory(System.getenv("PWD"));
+	}
+
+	/**
+	 * Resolves the working directory from a candidate path, extracted for testability ({@code System.getenv} cannot be
+	 * stubbed in-JVM).
+	 *
+	 * @param pwd the {@code PWD} candidate; may be {@code null}
+	 * @return the candidate when it is a live directory, otherwise the process directory
+	 */
+	static String resolveWorkingDirectory(String pwd) {
 		//For MacOS and Linux
-		String pwd = System.getenv("PWD");
 		if (pwd != null && !pwd.isEmpty()) {
 			File pwdFile = new File(pwd);
 			if (pwdFile.exists() && pwdFile.isDirectory()) {

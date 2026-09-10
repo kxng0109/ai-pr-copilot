@@ -203,6 +203,165 @@ public class AnalyzeCommandTest {
 		verify(gitService).getDiffAgainstBranch("master");
 	}
 
+	@Test
+	void execute_shouldReturnError_whenGitFails() {
+		when(gitService.isGitRepository()).thenReturn(true);
+		when(gitService.hasStagedChanges()).thenReturn(true);
+		when(gitService.getStagedDiff()).thenThrow(new RuntimeException("git exploded"));
+
+		int exitCode = commandLine.execute();
+
+		assertEquals(1, exitCode);
+		assertTrue(stderr.toString().contains("git exploded"));
+	}
+
+	@Test
+	void execute_quiet_shouldSuppressProgressMessages() {
+		when(gitService.isGitRepository()).thenReturn(true);
+		when(gitService.hasStagedChanges()).thenReturn(true);
+		when(gitService.getStagedDiff()).thenReturn("diff --git a/file.txt");
+		when(diffAnalysisService.analyzeDiff(any())).thenReturn(mockResponse());
+
+		int exitCode = commandLine.execute("--quiet");
+
+		assertEquals(0, exitCode);
+		assertFalse(stdout.toString().contains("Analyzing"));
+		assertTrue(stdout.toString().contains("feat:  add new feature"));
+	}
+
+	@Test
+	void execute_compact_shouldPrintHumanReadableResult() {
+		when(gitService.isGitRepository()).thenReturn(true);
+		when(gitService.hasStagedChanges()).thenReturn(true);
+		when(gitService.getStagedDiff()).thenReturn("diff --git a/file.txt");
+		when(diffAnalysisService.analyzeDiff(any())).thenReturn(mockResponse());
+
+		int exitCode = commandLine.execute("--format", "compact");
+
+		assertEquals(0, exitCode);
+		assertTrue(stdout.toString().contains("TITLE:"));
+		assertTrue(stdout.toString().contains("SUMMARY:"));
+	}
+
+	@Test
+	void execute_uncommitted_shouldAnalyzeAllUncommittedChanges() {
+		when(gitService.isGitRepository()).thenReturn(true);
+		when(gitService.getUncommittedDiff()).thenReturn("diff content");
+		when(diffAnalysisService.analyzeDiff(any())).thenReturn(mockResponse());
+
+		int exitCode = commandLine.execute("--uncommitted");
+
+		assertEquals(0, exitCode);
+		verify(gitService).getUncommittedDiff();
+		verify(diffAnalysisService).analyzeDiff(any());
+	}
+
+	@Test
+	void execute_version_shouldPrintVersion() {
+		int exitCode = commandLine.execute("--version");
+
+		assertEquals(0, exitCode);
+		assertTrue(stdout.toString().contains("ai-pr-copilot 1.0.0"));
+	}
+
+	@Test
+	void execute_shouldDetectDevelopBranch_whenNoStagedChanges() {
+		when(gitService.isGitRepository()).thenReturn(true);
+		when(gitService.hasStagedChanges()).thenReturn(false);
+		when(gitService.branchExists("main")).thenReturn(false);
+		when(gitService.branchExists("master")).thenReturn(false);
+		when(gitService.branchExists("develop")).thenReturn(true);
+		when(gitService.getDiffAgainstBranch("develop")).thenReturn("develop diff");
+		when(diffAnalysisService.analyzeDiff(any())).thenReturn(mockResponse());
+
+		int exitCode = commandLine.execute();
+
+		assertEquals(0, exitCode);
+		verify(gitService).getDiffAgainstBranch("develop");
+	}
+
+	@Test
+	void execute_blankBase_shouldFallThroughToDetection() {
+		when(gitService.isGitRepository()).thenReturn(true);
+		when(gitService.hasStagedChanges()).thenReturn(false);
+		when(gitService.branchExists("main")).thenReturn(false);
+		when(gitService.branchExists("master")).thenReturn(false);
+		when(gitService.branchExists("develop")).thenReturn(false);
+
+		int exitCode = commandLine.execute("--base", "  ");
+
+		assertEquals(0, exitCode);
+		assertTrue(stdout.toString().contains("No changes detected"));
+	}
+
+	@Test
+	void execute_shouldTryNextBranch_whenDiffBlank() {
+		when(gitService.isGitRepository()).thenReturn(true);
+		when(gitService.hasStagedChanges()).thenReturn(false);
+		when(gitService.branchExists("main")).thenReturn(true);
+		when(gitService.getDiffAgainstBranch("main")).thenReturn("   ");
+		when(gitService.branchExists("master")).thenReturn(true);
+		when(gitService.getDiffAgainstBranch("master")).thenReturn("master diff");
+		when(diffAnalysisService.analyzeDiff(any())).thenReturn(mockResponse());
+
+		int exitCode = commandLine.execute();
+
+		assertEquals(0, exitCode);
+		verify(gitService).getDiffAgainstBranch("master");
+	}
+
+	@Test
+	void execute_shouldTryNextBranch_whenDiffThrows() {
+		when(gitService.isGitRepository()).thenReturn(true);
+		when(gitService.hasStagedChanges()).thenReturn(false);
+		when(gitService.branchExists("main")).thenReturn(true);
+		when(gitService.getDiffAgainstBranch("main")).thenThrow(new RuntimeException("gone"));
+		when(gitService.branchExists("master")).thenReturn(false);
+		when(gitService.branchExists("develop")).thenReturn(false);
+
+		int exitCode = commandLine.execute();
+
+		assertEquals(0, exitCode);
+		assertTrue(stdout.toString().contains("No changes detected"));
+	}
+
+	@Test
+	void execute_compact_shouldSkipFiles_whenTouchedFilesNull() {
+		when(gitService.isGitRepository()).thenReturn(true);
+		when(gitService.hasStagedChanges()).thenReturn(true);
+		when(gitService.getStagedDiff()).thenReturn("diff");
+		AnalyzeDiffResponse withoutFiles = AnalyzeDiffResponse.builder()
+		                                                      .title("t")
+		                                                      .summary("s")
+		                                                      .details("d")
+		                                                      .build();
+		when(diffAnalysisService.analyzeDiff(any())).thenReturn(withoutFiles);
+
+		int exitCode = commandLine.execute("--format", "compact");
+
+		assertEquals(0, exitCode);
+		assertFalse(stdout.toString().contains("FILES:"));
+	}
+
+	@Test
+	void execute_compact_shouldSkipFiles_whenTouchedFilesEmpty() {
+		when(gitService.isGitRepository()).thenReturn(true);
+		when(gitService.hasStagedChanges()).thenReturn(true);
+		when(gitService.getStagedDiff()).thenReturn("diff");
+		AnalyzeDiffResponse withoutFiles = AnalyzeDiffResponse.builder()
+		                                                      .title("t")
+		                                                      .summary("s")
+		                                                      .details("d")
+		                                                      .touchedFiles(List.of())
+		                                                      .build();
+		when(diffAnalysisService.analyzeDiff(any())).thenReturn(withoutFiles);
+
+		int exitCode = commandLine.execute("--format", "compact");
+
+		assertEquals(0, exitCode);
+		assertFalse(stdout.toString().contains("FILES:"));
+	}
+
 	private AnalyzeDiffResponse mockResponse() {
 		return AnalyzeDiffResponse.builder()
 		                          .title("feat:  add new feature")

@@ -3,21 +3,28 @@ package io.github.kxng0109.aiprcopilot.controller;
 import io.github.kxng0109.aiprcopilot.api.dto.AiCallMetadata;
 import io.github.kxng0109.aiprcopilot.api.dto.AnalyzeDiffRequest;
 import io.github.kxng0109.aiprcopilot.api.dto.AnalyzeDiffResponse;
+import io.github.kxng0109.aiprcopilot.api.dto.ErrorResponse;
 import io.github.kxng0109.aiprcopilot.error.DiffTooLargeException;
 import io.github.kxng0109.aiprcopilot.service.DiffAnalysisService;
 import io.github.kxng0109.aiprcopilot.service.SarifService;
+import io.github.resilience4j.ratelimiter.RateLimiter;
+import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -142,6 +149,97 @@ public class DiffAnalysisControllerTest {
 		       .andExpect(jsonPath("$.validationErrors.requestId").exists());
 
 		verify(diffAnalysisService, never()).analyzeDiff(any(AnalyzeDiffRequest.class));
+	}
+
+	@Test
+	void analyzeDiffRateLimited_shouldHandleNullRequest() {
+		DiffAnalysisController controller =
+				new DiffAnalysisController(diffAnalysisService, sarifService);
+
+		ResponseEntity<ErrorResponse> response = controller.analyzeDiffRateLimited(
+				null, RequestNotPermitted.createRequestNotPermitted(RateLimiter.ofDefaults("test")));
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+		assertThat(response.getBody().requestId()).isNull();
+		assertThat(response.getBody().path()).isEqualTo("/api/v1/analyze-diff");
+	}
+
+	@Test
+	void analyzeDiffRateLimited_shouldEchoRequestId_whenPresent() {
+		DiffAnalysisController controller =
+				new DiffAnalysisController(diffAnalysisService, sarifService);
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("d")
+		                                               .requestId("req-9")
+		                                               .build();
+
+		ResponseEntity<ErrorResponse> response = controller.analyzeDiffRateLimited(
+				request, RequestNotPermitted.createRequestNotPermitted(RateLimiter.ofDefaults("test")));
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+		assertThat(response.getBody().requestId()).isEqualTo("req-9");
+	}
+
+	@Test
+	void analyzeSarifRateLimited_shouldShape429() {
+		DiffAnalysisController controller =
+				new DiffAnalysisController(diffAnalysisService, sarifService);
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("d")
+		                                               .requestId("req-7")
+		                                               .build();
+
+		ResponseEntity<ErrorResponse> response = controller.analyzeSarifRateLimited(
+				request, RequestNotPermitted.createRequestNotPermitted(RateLimiter.ofDefaults("test")));
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+		assertThat(response.getBody().requestId()).isEqualTo("req-7");
+		assertThat(response.getBody().path()).isEqualTo("/api/v1/analyze-diff/sarif");
+	}
+
+	@Test
+	void analyzeSarifRateLimited_shouldHandleNullRequest() {
+		DiffAnalysisController controller =
+				new DiffAnalysisController(diffAnalysisService, sarifService);
+
+		ResponseEntity<ErrorResponse> response = controller.analyzeSarifRateLimited(
+				null, RequestNotPermitted.createRequestNotPermitted(RateLimiter.ofDefaults("test")));
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+		assertThat(response.getBody().requestId()).isNull();
+	}
+
+	@Test
+	void analyzeStreamRateLimited_shouldReturnFailingEmitter() {
+		DiffAnalysisController controller =
+				new DiffAnalysisController(diffAnalysisService, sarifService);
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("d")
+		                                               .requestId("req-3")
+		                                               .build();
+
+		SseEmitter emitter = controller.analyzeStreamRateLimited(
+				request, RequestNotPermitted.createRequestNotPermitted(RateLimiter.ofDefaults("test")));
+
+		assertThat(emitter).isNotNull();
+	}
+
+	@Test
+	void analyzeDiffStream_shouldReturn400_whenDiffIsBlank() throws Exception {
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("  ")
+		                                               .language("en")
+		                                               .style("conventional-commits")
+		                                               .maxSummaryLength(300)
+		                                               .requestId("req-1")
+		                                               .build();
+
+		mockMvc.perform(post("/api/v1/analyze-diff/stream")
+				                .contentType(MediaType.APPLICATION_JSON)
+				                .content(objectMapper.writeValueAsString(request)))
+		       .andExpect(status().isBadRequest());
+
+		verify(diffAnalysisService, never()).streamAnalyze(any(AnalyzeDiffRequest.class));
 	}
 
 	@Test

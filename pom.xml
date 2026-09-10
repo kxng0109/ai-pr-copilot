@@ -16,6 +16,9 @@
     <properties>
         <java.version>25</java.version>
         <spring-ai.version>2.0.1</spring-ai.version>
+        <!-- JaCoCo 0.8.15 (2026-06-04): latest release supporting Java 25
+             class files (official since 0.8.14). No known CVEs. -->
+        <jacoco.version>0.8.15</jacoco.version>
         <!-- Spring Boot 4.1.1 BOM manages tomcat-embed-core at 11.0.24,
              which carries CVE-2026-65182 (security constraint bypass),
              CVE-2026-65905 and CVE-2026-68525 (auth bypasses). 11.0.25
@@ -180,6 +183,88 @@
                         </exclude>
                     </excludes>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <executions>
+                    <execution>
+                        <id>default-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>default-report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                        <configuration>
+                            <formats>
+                                <format>HTML</format>
+                                <format>XML</format>
+                                <format>CSV</format>
+                            </formats>
+                            <!-- Sole exclusion: the bootstrap class only wires and
+                                 launches (main/runCliMode boot Spring or call
+                                 System.exit — uncoverable in-JVM by design).
+                                 Verified by AiPrCopilotApplicationTests.contextLoads
+                                 instead. Never exclude logic or security classes.
+                                 Trailing wildcard covers the class file (JaCoCo
+                                 matches excludes against class-file paths). -->
+                            <excludes>
+                                <exclude>io/github/kxng0109/aiprcopilot/AiPrCopilotApplication*</exclude>
+                            </excludes>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>default-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <!-- Keep in sync with default-report excludes. -->
+                            <excludes>
+                                <exclude>io/github/kxng0109/aiprcopilot/AiPrCopilotApplication*</exclude>
+                            </excludes>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.cyclonedx</groupId>

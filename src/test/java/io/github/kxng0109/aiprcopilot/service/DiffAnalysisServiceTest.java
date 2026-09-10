@@ -9,11 +9,13 @@ import io.github.kxng0109.aiprcopilot.config.PrCopilotLoggingProperties;
 import io.github.kxng0109.aiprcopilot.error.CustomApiException;
 import io.github.kxng0109.aiprcopilot.error.DiffTooLargeException;
 import io.github.kxng0109.aiprcopilot.error.ModelOutputParseException;
+import io.github.resilience4j.bulkhead.BulkheadFullException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.MockedConstruction;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -24,6 +26,9 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
 
@@ -437,6 +442,319 @@ public class DiffAnalysisServiceTest {
 		verify(aiChatService, times(1)).callAiModel(any(), any(), any());
 	}
 
+	private DiffAnalysisService serviceWithFallback(ChatClient fallbackClient,
+	                                                ChatOptions.Builder fallbackOptions) {
+		return new DiffAnalysisService(
+				analysisProperties,
+				primaryChatClient,
+				primaryChatOptions,
+				loggingProperties,
+				multiAiConfigurationProperties,
+				promptBuilderService,
+				aiChatService,
+				diffResponseMapperService,
+				bulkheadRegistry,
+				analysisCache,
+				analysisMetrics,
+				fallbackClient,
+				fallbackOptions
+		);
+	}
+
+	@Test
+	void analyzeDiff_shouldSkipCache_whenDisabled() {
+		Prompt mockPrompt = mock(Prompt.class);
+		when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
+				.thenReturn(mockPrompt);
+		when(aiChatService.callAiModel(any(), any(), any()))
+				.thenReturn(mockChatResponse());
+		when(diffResponseMapperService.mapToAnalyzeDiffResponse(any(), anyLong(), any(), any(), any()))
+				.thenReturn(AnalyzeDiffResponse.builder().title("t").build());
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		assertNotNull(diffAnalysisService.analyzeDiff(request));
+		verify(analysisCache, never()).getIfPresent(anyString());
+		verify(analysisCache, never()).put(anyString(), any());
+	}
+
+	@Test
+	void analyzeDiff_shouldRethrowSameCustomApi_whenNoFallback() {
+		CustomApiException failure =
+				new CustomApiException("p-down", org.springframework.http.HttpStatus.BAD_GATEWAY);
+		when(aiChatService.callAiModel(any(), any(), any())).thenThrow(failure);
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		assertThat(assertThrows(
+				CustomApiException.class,
+				() -> diffAnalysisService.analyzeDiff(request)
+		)).isSameAs(failure);
+	}
+
+	@Test
+	void analyzeDiff_shouldWrapGeneric_whenNoFallback() {
+		when(aiChatService.callAiModel(any(), any(), any()))
+				.thenThrow(new IllegalStateException("weird"));
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		RuntimeException exception = assertThrows(
+				RuntimeException.class,
+				() -> diffAnalysisService.analyzeDiff(request)
+		);
+		assertThat(exception.getMessage())
+				.contains("Could not process diff analysis due to internal error");
+	}
+
+	@Test
+	void analyzeDiff_shouldCombineMessages_whenFallbackCustomApi() {
+		when(multiAiConfigurationProperties.isAutoFallback()).thenReturn(true);
+		when(multiAiConfigurationProperties.getFallbackProvider()).thenReturn(AiProvider.ANTHROPIC);
+		ChatClient fallbackClient = mock(ChatClient.class);
+		ChatOptions.Builder fallbackOptions = mock(ChatOptions.Builder.class);
+		diffAnalysisService = serviceWithFallback(fallbackClient, fallbackOptions);
+
+		Prompt mockPrompt = mock(Prompt.class);
+		when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
+				.thenReturn(mockPrompt);
+		when(aiChatService.callAiModel(mockPrompt, primaryChatClient, primaryChatOptions))
+				.thenThrow(new CustomApiException(
+						"p-down",
+						org.springframework.http.HttpStatus.BAD_GATEWAY
+				));
+		when(aiChatService.callAiModel(mockPrompt, fallbackClient, fallbackOptions))
+				.thenThrow(new CustomApiException(
+						"f-down",
+						org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE
+				));
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		CustomApiException exception = assertThrows(
+				CustomApiException.class,
+				() -> diffAnalysisService.analyzeDiff(request)
+		);
+		assertThat(exception.getMessage()).contains("Primary: p-down. Fallback: f-down");
+		assertThat(exception.getHttpStatus())
+				.isEqualTo(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE);
+	}
+
+	@Test
+	void analyzeDiff_shouldThrowRuntime_whenFallbackGeneric() {
+		when(multiAiConfigurationProperties.isAutoFallback()).thenReturn(true);
+		when(multiAiConfigurationProperties.getFallbackProvider()).thenReturn(AiProvider.ANTHROPIC);
+		ChatClient fallbackClient = mock(ChatClient.class);
+		ChatOptions.Builder fallbackOptions = mock(ChatOptions.Builder.class);
+		diffAnalysisService = serviceWithFallback(fallbackClient, fallbackOptions);
+
+		Prompt mockPrompt = mock(Prompt.class);
+		when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
+				.thenReturn(mockPrompt);
+		when(aiChatService.callAiModel(mockPrompt, primaryChatClient, primaryChatOptions))
+				.thenThrow(new CustomApiException(
+						"p-down",
+						org.springframework.http.HttpStatus.BAD_GATEWAY
+				));
+		when(aiChatService.callAiModel(mockPrompt, fallbackClient, fallbackOptions))
+				.thenThrow(new IllegalStateException("f-broken"));
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		RuntimeException exception = assertThrows(
+				RuntimeException.class,
+				() -> diffAnalysisService.analyzeDiff(request)
+		);
+		assertThat(exception.getMessage()).contains("across the two providers");
+	}
+
+	@Test
+	void analyzeDiff_shouldUseDefaults_whenLanguageAndStyleAreBlank() {
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("a diff sha")
+		                                               .language("  ")
+		                                               .style("")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		Prompt mockPrompt = mock(Prompt.class);
+		when(promptBuilderService.buildDiffAnalysisPrompt(
+				eq("en"),
+				eq("conventional-commits"),
+				eq("a diff sha"),
+				isNull(),
+				eq("req-1")
+		)).thenReturn(mockPrompt);
+		when(aiChatService.callAiModel(any(), any(), any()))
+				.thenReturn(mockChatResponse());
+		when(diffResponseMapperService.mapToAnalyzeDiffResponse(any(), anyLong(), any(), any(), any()))
+				.thenReturn(AnalyzeDiffResponse.builder().title("t").build());
+
+		assertNotNull(diffAnalysisService.analyzeDiff(request));
+		verify(promptBuilderService).buildDiffAnalysisPrompt(
+				eq("en"), eq("conventional-commits"), eq("a diff sha"), isNull(), eq("req-1"));
+	}
+
+	@Test
+	void streamAnalyze_shouldEmitErrorEvent_whenDiffBlank() throws Exception {
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("  ")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		try (MockedConstruction<SseEmitter> emitters = mockConstruction(SseEmitter.class)) {
+			diffAnalysisService.streamAnalyze(request);
+
+			assertThat(emitters.constructed()).hasSize(1);
+			SseEmitter emitter = emitters.constructed().getFirst();
+			verify(emitter, timeout(5000).times(1)).send((SseEmitter.SseEventBuilder) any());
+			verify(emitter, timeout(5000).times(1)).complete();
+			verify(aiChatService, never()).streamAiModel(any(), any(), any());
+		}
+	}
+
+	@Test
+	void streamAnalyze_shouldEmitErrorEvent_whenDiffTooLarge() throws Exception {
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("x".repeat(60000))
+		                                               .requestId("req-1")
+		                                               .build();
+
+		try (MockedConstruction<SseEmitter> emitters = mockConstruction(SseEmitter.class)) {
+			diffAnalysisService.streamAnalyze(request);
+
+			SseEmitter emitter = emitters.constructed().getFirst();
+			verify(emitter, timeout(5000).times(1)).send((SseEmitter.SseEventBuilder) any());
+			verify(emitter, timeout(5000).times(1)).complete();
+			verify(aiChatService, never()).streamAiModel(any(), any(), any());
+		}
+	}
+
+	@Test
+	void streamAnalyze_shouldEmitCachedResult_whenHit() throws Exception {
+		when(analysisProperties.getCacheMaxSize()).thenReturn(1000);
+		AnalyzeDiffResponse cached = AnalyzeDiffResponse.builder()
+		                                                .title("cached")
+		                                                .requestId("old")
+		                                                .build();
+		when(analysisCache.getIfPresent(anyString())).thenReturn(cached);
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		try (MockedConstruction<SseEmitter> emitters = mockConstruction(SseEmitter.class)) {
+			diffAnalysisService.streamAnalyze(request);
+
+			SseEmitter emitter = emitters.constructed().getFirst();
+			verify(emitter, timeout(5000).times(3)).send((SseEmitter.SseEventBuilder) any());
+			verify(emitter, timeout(5000).times(1)).complete();
+			verify(aiChatService, never()).streamAiModel(any(), any(), any());
+		}
+	}
+
+	@Test
+	void streamAnalyze_shouldStreamLiveResult_whenHappy() throws Exception {
+		Prompt mockPrompt = mock(Prompt.class);
+		when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
+				.thenReturn(mockPrompt);
+		ChatResponse nullResultChunk = mock(ChatResponse.class);
+		when(aiChatService.streamAiModel(eq(mockPrompt), eq(primaryChatClient), eq(primaryChatOptions)))
+				.thenReturn(Flux.just(
+						new ChatResponse(List.of(new Generation(new AssistantMessage("tok1")))),
+						nullResultChunk,
+						new ChatResponse(List.of(new Generation(new AssistantMessage(""))))
+				));
+		when(diffResponseMapperService.mapToAnalyzeDiffResponse(any(), anyLong(), any(), any(), any()))
+				.thenReturn(AnalyzeDiffResponse.builder().title("live").build());
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		try (MockedConstruction<SseEmitter> emitters = mockConstruction(SseEmitter.class)) {
+			diffAnalysisService.streamAnalyze(request);
+
+			SseEmitter emitter = emitters.constructed().getFirst();
+			verify(emitter, timeout(5000).times(4)).send((SseEmitter.SseEventBuilder) any());
+			verify(emitter, timeout(5000).times(1)).complete();
+			verify(emitter, timeout(500).times(0)).completeWithError(any());
+		}
+	}
+
+	@Test
+	void streamAnalyze_shouldEmitError_whenBulkheadFull() throws Exception {
+		doThrow(BulkheadFullException.createBulkheadFullException(
+				io.github.resilience4j.bulkhead.Bulkhead.ofDefaults("test")))
+				.when(bulkhead).executeSupplier(any());
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		try (MockedConstruction<SseEmitter> emitters = mockConstruction(SseEmitter.class)) {
+			diffAnalysisService.streamAnalyze(request);
+
+			SseEmitter emitter = emitters.constructed().getFirst();
+			verify(emitter, timeout(5000).times(2)).send((SseEmitter.SseEventBuilder) any());
+			verify(emitter, timeout(5000).times(1)).complete();
+		}
+	}
+
+	@Test
+	void streamAnalyze_shouldCompleteWithError_whenNoChunks() {
+		when(aiChatService.streamAiModel(any(), any(), any())).thenReturn(Flux.empty());
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		try (MockedConstruction<SseEmitter> emitters = mockConstruction(SseEmitter.class)) {
+			diffAnalysisService.streamAnalyze(request);
+
+			SseEmitter emitter = emitters.constructed().getFirst();
+			verify(emitter, timeout(5000).times(1)).completeWithError(
+					argThat(e -> e instanceof ModelOutputParseException));
+		}
+	}
+
+	@Test
+	void streamAnalyze_shouldCompleteWithError_whenAiFails() {
+		RuntimeException failure = new RuntimeException("ai down");
+		when(aiChatService.streamAiModel(any(), any(), any())).thenThrow(failure);
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		try (MockedConstruction<SseEmitter> emitters = mockConstruction(SseEmitter.class)) {
+			diffAnalysisService.streamAnalyze(request);
+
+			SseEmitter emitter = emitters.constructed().getFirst();
+			verify(emitter, timeout(5000).times(1)).completeWithError(failure);
+		}
+	}
+
 	private ChatResponse mockChatResponse() {
 		Generation generation = new Generation(
 				new AssistantMessage("Some details or message")
@@ -453,5 +771,169 @@ public class DiffAnalysisServiceTest {
 		                   .generations(List.of(generation))
 		                   .metadata(chatResponseMetadata)
 		                   .build();
+	}
+
+	@Test
+	void analyzeDiff_shouldPutCache_whenEnabledAndMiss() {
+		when(analysisProperties.getCacheMaxSize()).thenReturn(1000);
+		when(analysisCache.getIfPresent(anyString())).thenReturn(null);
+		Prompt mockPrompt = mock(Prompt.class);
+		when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
+				.thenReturn(mockPrompt);
+		when(aiChatService.callAiModel(any(), any(), any()))
+				.thenReturn(mockChatResponse());
+		AnalyzeDiffResponse mapped = AnalyzeDiffResponse.builder().title("t").build();
+		when(diffResponseMapperService.mapToAnalyzeDiffResponse(any(), anyLong(), any(), any(), any()))
+				.thenReturn(mapped);
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		assertThat(diffAnalysisService.analyzeDiff(request)).isSameAs(mapped);
+		verify(analysisCache).put(anyString(), eq(mapped));
+		verify(analysisMetrics).countCacheMiss("openai");
+	}
+
+	@Test
+	void analyzeDiff_shouldUseOllamaBulkhead_whenProviderIsOllama() {
+		when(multiAiConfigurationProperties.getProvider()).thenReturn(AiProvider.OLLAMA);
+		Prompt mockPrompt = mock(Prompt.class);
+		when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
+				.thenReturn(mockPrompt);
+		when(aiChatService.callAiModel(any(), any(), any()))
+				.thenReturn(mockChatResponse());
+		when(diffResponseMapperService.mapToAnalyzeDiffResponse(any(), anyLong(), any(), any(), any()))
+				.thenReturn(AnalyzeDiffResponse.builder().title("t").build());
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		diffAnalysisService.analyzeDiff(request);
+
+		verify(bulkheadRegistry).bulkhead("ai-ollama");
+	}
+
+	@Test
+	void analyzeDiff_shouldRethrowSame_whenFallbackEnabledButNoClient() {
+		when(multiAiConfigurationProperties.isAutoFallback()).thenReturn(true);
+		CustomApiException failure =
+				new CustomApiException("p-down", org.springframework.http.HttpStatus.BAD_GATEWAY);
+		when(aiChatService.callAiModel(any(), any(), any())).thenThrow(failure);
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		assertThat(assertThrows(
+				CustomApiException.class,
+				() -> diffAnalysisService.analyzeDiff(request)
+		)).isSameAs(failure);
+	}
+
+	@Test
+	void streamAnalyze_shouldUseOllamaBulkhead_whenProviderIsOllama() throws Exception {
+		when(multiAiConfigurationProperties.getProvider()).thenReturn(AiProvider.OLLAMA);
+		when(aiChatService.streamAiModel(any(), any(), any()))
+				.thenReturn(Flux.just(new ChatResponse(
+						List.of(new Generation(new AssistantMessage("tok"))))));
+		when(diffResponseMapperService.mapToAnalyzeDiffResponse(any(), anyLong(), any(), any(), any()))
+				.thenReturn(AnalyzeDiffResponse.builder().title("t").build());
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		try (MockedConstruction<SseEmitter> emitters = mockConstruction(SseEmitter.class)) {
+			diffAnalysisService.streamAnalyze(request);
+
+			SseEmitter emitter = emitters.constructed().getFirst();
+			verify(emitter, timeout(5000).times(1)).complete();
+		}
+		verify(bulkheadRegistry).bulkhead("ai-ollama");
+	}
+
+	@Test
+	@SuppressWarnings("unchecked")
+	void streamAnalyze_shouldCompleteWithError_whenChunksNull() {
+		Flux<ChatResponse> flux = mock(Flux.class);
+		when(flux.collectList()).thenReturn(mock(Mono.class));
+		when(aiChatService.streamAiModel(any(), any(), any())).thenReturn(flux);
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		try (MockedConstruction<SseEmitter> emitters = mockConstruction(SseEmitter.class)) {
+			diffAnalysisService.streamAnalyze(request);
+
+			SseEmitter emitter = emitters.constructed().getFirst();
+			verify(emitter, timeout(5000).times(1)).completeWithError(
+					argThat(e -> e instanceof ModelOutputParseException));
+		}
+	}
+
+	@Test
+	void streamAnalyze_shouldSkipNullOutputChunks() throws Exception {
+		Generation nullOutput = mock(Generation.class);
+		when(aiChatService.streamAiModel(any(), any(), any())).thenReturn(Flux.just(
+				new ChatResponse(List.of(new Generation(new AssistantMessage("tok")))),
+				new ChatResponse(List.of(nullOutput))
+		));
+		when(diffResponseMapperService.mapToAnalyzeDiffResponse(any(), anyLong(), any(), any(), any()))
+				.thenReturn(AnalyzeDiffResponse.builder().title("t").build());
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		try (MockedConstruction<SseEmitter> emitters = mockConstruction(SseEmitter.class)) {
+			diffAnalysisService.streamAnalyze(request);
+
+			SseEmitter emitter = emitters.constructed().getFirst();
+			verify(emitter, timeout(5000).times(4)).send((SseEmitter.SseEventBuilder) any());
+			verify(emitter, timeout(5000).times(1)).complete();
+		}
+	}
+
+	@Test
+	void streamAnalyze_shouldCompleteWithError_whenExceptionHasNoMessage() {
+		when(aiChatService.streamAiModel(any(), any(), any()))
+				.thenThrow(new RuntimeException());
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		try (MockedConstruction<SseEmitter> emitters = mockConstruction(SseEmitter.class)) {
+			diffAnalysisService.streamAnalyze(request);
+
+			SseEmitter emitter = emitters.constructed().getFirst();
+			verify(emitter, timeout(5000).times(1)).completeWithError(any(Throwable.class));
+		}
+	}
+
+	@Test
+	void streamAnalyze_shouldEmitErrorEvent_whenDiffNull() throws Exception {
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .requestId("req-1")
+		                                               .build();
+
+		try (MockedConstruction<SseEmitter> emitters = mockConstruction(SseEmitter.class)) {
+			diffAnalysisService.streamAnalyze(request);
+
+			SseEmitter emitter = emitters.constructed().getFirst();
+			verify(emitter, timeout(5000).times(1)).send((SseEmitter.SseEventBuilder) any());
+			verify(emitter, timeout(5000).times(1)).complete();
+			verify(aiChatService, never()).streamAiModel(any(), any(), any());
+		}
 	}
 }

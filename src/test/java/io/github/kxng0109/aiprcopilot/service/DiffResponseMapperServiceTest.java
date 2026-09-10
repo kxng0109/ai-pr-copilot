@@ -1,12 +1,15 @@
 package io.github.kxng0109.aiprcopilot.service;
 
 import io.github.kxng0109.aiprcopilot.api.dto.AnalyzeDiffResponse;
+import io.github.kxng0109.aiprcopilot.api.dto.RiskItem;
 import io.github.kxng0109.aiprcopilot.config.PrCopilotAnalysisProperties;
 import io.github.kxng0109.aiprcopilot.config.PrCopilotLoggingProperties;
 import io.github.kxng0109.aiprcopilot.error.ModelOutputParseException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -18,12 +21,13 @@ import org.springframework.ai.chat.model.Generation;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class DiffResponseMapperServiceTest {
@@ -303,6 +307,297 @@ class DiffResponseMapperServiceTest {
 		assertThat(result.risks()).hasSize(200);
 		assertThat(result.suggestedTests()).hasSize(100);
 		assertThat(result.touchedFiles()).hasSize(500);
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldThrow_whenOutputTooLarge() {
+		when(analysisProperties.getMaxModelOutputChars()).thenReturn(10);
+		String json = "{\"title\":\"test\",\"summary\":\"s\",\"details\":\"d\","
+				+ "\"risks\":[],\"suggestedTests\":[],\"touchedFiles\":[],\"analysisNotes\":null}";
+
+		ModelOutputParseException exception = assertThrows(
+				ModelOutputParseException.class,
+				() -> mapperService.mapToAnalyzeDiffResponse(
+						createChatResponse(json), 100L, "diff", "req-1", "openai")
+		);
+		assertThat(exception.getMessage()).contains("exceeded maximum allowed size");
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldKeepExactBoundaryLists() {
+		StringBuilder risks = new StringBuilder();
+		for (int i = 0; i < 200; i++) {
+			if (i > 0) {
+				risks.append(',');
+			}
+			risks.append("{\"level\":\"note\",\"message\":\"risk ").append(i).append("\"}");
+		}
+		String json = "{\"title\":\"test\",\"summary\":\"s\",\"details\":\"d\","
+				+ "\"risks\":[" + risks + "],"
+				+ "\"suggestedTests\":[],\"touchedFiles\":[],\"analysisNotes\":null}";
+
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				createChatResponse(json), 100L, "diff", "req-1", "openai");
+
+		assertThat(result.risks()).hasSize(200);
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldParseFencedAndPrefixedJson() {
+		String json = "Here is the analysis:\n```json\n"
+				+ "{\"title\":\"test\",\"summary\":\"s\",\"details\":\"d\","
+				+ "\"risks\":[],\"suggestedTests\":[],\"touchedFiles\":[],\"analysisNotes\":null}\n```";
+
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				createChatResponse(json), 100L, "diff", "req-1", "openai");
+
+		assertThat(result.title()).isEqualTo("test");
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldReturnEmptyTouchedFiles_whenDiffHasNoGitHeaders() {
+		String json = "{\"title\":\"test\",\"summary\":\"s\",\"details\":\"d\","
+				+ "\"risks\":[],\"suggestedTests\":[],\"touchedFiles\":null,\"analysisNotes\":null}";
+
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				createChatResponse(json), 100L, "plain text without git headers", "req-1", "openai");
+
+		assertThat(result.touchedFiles()).isEmpty();
+	}
+
+	@Test
+	void riskScore_shouldCapAt100AndWeightNotes() {
+		List<RiskItem> errors = List.of(
+				new RiskItem("error", "a"),
+				new RiskItem("error", "b"),
+				new RiskItem("error", "c"),
+				new RiskItem("error", "d"),
+				new RiskItem("error", "e")
+		);
+		assertThat(DiffResponseMapperService.riskScore(errors)).isEqualTo(100);
+
+		List<RiskItem> notes = List.of(new RiskItem("note", "a"), new RiskItem("note", "b"));
+		assertThat(DiffResponseMapperService.riskScore(notes)).isEqualTo(4);
+
+		assertThat(DiffResponseMapperService.riskScore(List.of())).isZero();
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldLogRawOutput_whenDebugEnabled() {
+		ch.qos.logback.classic.Logger logger =
+				(ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(
+						DiffResponseMapperService.class);
+		ch.qos.logback.classic.Level previous = logger.getLevel();
+		logger.setLevel(ch.qos.logback.classic.Level.DEBUG);
+		try {
+			String json = "{\"title\":\"test\",\"summary\":\"s\",\"details\":\"d\","
+					+ "\"risks\":[],\"suggestedTests\":[],\"touchedFiles\":[],\"analysisNotes\":null}";
+
+			AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+					createChatResponse(json), 100L, "diff", "req-1", "openai");
+
+			assertThat(result.title()).isEqualTo("test");
+		} finally {
+			logger.setLevel(previous);
+		}
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = {"title", "summary", "details", "risks", "suggestedTests"})
+	void mapToAnalyzeDiffResponse_shouldThrow_whenRequiredFieldMissing(String field) {
+		Map<String, Object> doc = new LinkedHashMap<>();
+		doc.put("title", "test");
+		doc.put("summary", "s");
+		doc.put("details", "d");
+		doc.put("risks", List.of());
+		doc.put("suggestedTests", List.of());
+		doc.put("touchedFiles", List.of());
+		doc.put("analysisNotes", null);
+		doc.put(field, null);
+		String json;
+		try {
+			json = new JsonMapper().writeValueAsString(doc);
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+
+		assertThrows(
+				ModelOutputParseException.class, () -> mapperService.mapToAnalyzeDiffResponse(
+						createChatResponse(json), 100L, "diff", "req-1", "openai")
+		);
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldLogResponses_whenEnabled() {
+		when(loggingProperties.isLogResponses()).thenReturn(true);
+		String json = "{\"title\":\"test\",\"summary\":\"s\",\"details\":\"d\","
+				+ "\"risks\":[],\"suggestedTests\":[],\"touchedFiles\":[],\"analysisNotes\":null}";
+
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				createChatResponse(json), 100L, "diff", "req-1", "openai");
+
+		assertThat(result.title()).isEqualTo("test");
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldNullTokens_whenUsageHasNoTotal() {
+		Usage usage = mock(Usage.class);
+		when(usage.getTotalTokens()).thenReturn(null);
+		ChatResponseMetadata metadata = ChatResponseMetadata.builder()
+		                                                    .model("gpt-4o")
+		                                                    .usage(usage)
+		                                                    .build();
+		String json = "{\"title\":\"test\",\"summary\":\"s\",\"details\":\"d\","
+				+ "\"risks\":[],\"suggestedTests\":[],\"touchedFiles\":[],\"analysisNotes\":null}";
+		ChatResponse response = ChatResponse.builder()
+		                                    .generations(List.of(new Generation(new AssistantMessage(json))))
+		                                    .metadata(metadata)
+		                                    .build();
+
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				response, 100L, "diff", "req-1", "openai");
+
+		assertThat(result.metadata().tokensUsed()).isNull();
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldWrapUnexpectedErrors() {
+		ChatResponse response = mock(ChatResponse.class);
+		Generation generation = new Generation(new AssistantMessage(
+				"{\"title\":\"t\",\"summary\":\"s\",\"details\":\"d\","
+						+ "\"risks\":[],\"suggestedTests\":[],\"touchedFiles\":[],\"analysisNotes\":null}"));
+		when(response.getResult()).thenReturn(generation);
+		when(response.getMetadata()).thenReturn(null);
+
+		RuntimeException exception = assertThrows(
+				RuntimeException.class,
+				() -> mapperService.mapToAnalyzeDiffResponse(
+						response, 100L, "diff", "req-1", "openai")
+		);
+		assertThat(exception.getMessage()).contains("Unexpected error mapping AI output");
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldThrow_whenRiskItemNull() {
+		String json = "{\"title\":\"test\",\"summary\":\"s\",\"details\":\"d\","
+				+ "\"risks\":[null],\"suggestedTests\":[],\"touchedFiles\":[],\"analysisNotes\":null}";
+
+		assertThrows(
+				ModelOutputParseException.class, () -> mapperService.mapToAnalyzeDiffResponse(
+						createChatResponse(json), 100L, "diff", "req-1", "openai")
+		);
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldThrow_whenRiskMessageNull() {
+		String json = "{\"title\":\"test\",\"summary\":\"s\",\"details\":\"d\","
+				+ "\"risks\":[{\"level\":\"note\",\"message\":null}],"
+				+ "\"suggestedTests\":[],\"touchedFiles\":[],\"analysisNotes\":null}";
+
+		assertThrows(
+				ModelOutputParseException.class, () -> mapperService.mapToAnalyzeDiffResponse(
+						createChatResponse(json), 100L, "diff", "req-1", "openai")
+		);
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldThrow_whenRiskMessageBlank() {
+		String json = "{\"title\":\"test\",\"summary\":\"s\",\"details\":\"d\","
+				+ "\"risks\":[{\"level\":\"note\",\"message\":\"  \"}],"
+				+ "\"suggestedTests\":[],\"touchedFiles\":[],\"analysisNotes\":null}";
+
+		assertThrows(
+				ModelOutputParseException.class, () -> mapperService.mapToAnalyzeDiffResponse(
+						createChatResponse(json), 100L, "diff", "req-1", "openai")
+		);
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldThrow_whenResultMissing() {
+		ChatResponse response = mock(ChatResponse.class);
+		when(response.getResult()).thenThrow(new RuntimeException("no result"));
+
+		assertThrows(
+				ModelOutputParseException.class, () -> mapperService.mapToAnalyzeDiffResponse(
+						response, 100L, "diff", "req-1", "openai")
+		);
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldThrow_whenTextNull() {
+		AssistantMessage message = mock(AssistantMessage.class);
+		Generation generation = mock(Generation.class);
+		when(generation.getOutput()).thenReturn(message);
+		ChatResponse response = mock(ChatResponse.class);
+		when(response.getResult()).thenReturn(generation);
+
+		assertThrows(
+				ModelOutputParseException.class, () -> mapperService.mapToAnalyzeDiffResponse(
+						response, 100L, "diff", "req-1", "openai")
+		);
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldThrow_whenTextBlank() {
+		ChatResponse response = mock(ChatResponse.class);
+		when(response.getResult()).thenReturn(new Generation(new AssistantMessage("   ")));
+
+		assertThrows(
+				ModelOutputParseException.class, () -> mapperService.mapToAnalyzeDiffResponse(
+						response, 100L, "diff", "req-1", "openai")
+		);
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldThrow_whenNoBraces() {
+		ChatResponse response = createChatResponse("just some prose without braces");
+
+		assertThrows(
+				ModelOutputParseException.class, () -> mapperService.mapToAnalyzeDiffResponse(
+						response, 100L, "diff", "req-1", "openai")
+		);
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldThrow_whenBracesReversed() {
+		ChatResponse response = createChatResponse("} reversed { braces");
+
+		assertThrows(
+				ModelOutputParseException.class, () -> mapperService.mapToAnalyzeDiffResponse(
+						response, 100L, "diff", "req-1", "openai")
+		);
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldThrow_whenCloseBraceMissing() {
+		ChatResponse response = createChatResponse("prefix {\"title\":\"t\"");
+
+		assertThrows(
+				ModelOutputParseException.class, () -> mapperService.mapToAnalyzeDiffResponse(
+						response, 100L, "diff", "req-1", "openai")
+		);
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldReturnEmptyTouchedFiles_whenDiffNull() {
+		String json = "{\"title\":\"test\",\"summary\":\"s\",\"details\":\"d\","
+				+ "\"risks\":[],\"suggestedTests\":[],\"touchedFiles\":null,\"analysisNotes\":null}";
+
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				createChatResponse(json), 100L, null, "req-1", "openai");
+
+		assertThat(result.touchedFiles()).isEmpty();
+	}
+
+	@Test
+	void mapToAnalyzeDiffResponse_shouldReturnEmptyTouchedFiles_whenDiffBlank() {
+		String json = "{\"title\":\"test\",\"summary\":\"s\",\"details\":\"d\","
+				+ "\"risks\":[],\"suggestedTests\":[],\"touchedFiles\":null,\"analysisNotes\":null}";
+
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				createChatResponse(json), 100L, "   ", "req-1", "openai");
+
+		assertThat(result.touchedFiles()).isEmpty();
 	}
 
 	@Test

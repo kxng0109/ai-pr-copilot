@@ -73,10 +73,10 @@ services:
     deploy:
       resources:
         reservations:
-          memory: ${APP_REQUEST_MEM:-512M}
+          memory: "${APP_REQUEST_MEM:-512M}"
           cpus: "${APP_REQUEST_CPU:-0.5}"
         limits:
-          memory: ${APP_LIMIT_MEM:-1G}
+          memory: "${APP_LIMIT_MEM:-1G}"
           cpus: "${APP_LIMIT_CPU:-2.0}"
 
     volumes:
@@ -120,10 +120,10 @@ services:
     deploy:
       resources:
         reservations:
-          memory: ${OLLAMA_REQUEST_MEM:-2G}
+          memory: "${OLLAMA_REQUEST_MEM:-2G}"
           cpus: "${OLLAMA_REQUEST_CPU:-2.0}"
         limits:
-          memory: ${OLLAMA_LIMIT_MEM:-8G}
+          memory: "${OLLAMA_LIMIT_MEM:-8G}"
           cpus: "${OLLAMA_LIMIT_CPU:-4.0}"
 
     healthcheck:

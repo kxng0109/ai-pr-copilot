@@ -2,6 +2,7 @@ package io.github.kxng0109.aiprcopilot.config;
 
 import io.github.kxng0109.aiprcopilot.error.DiffTooLargeException;
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
@@ -139,6 +140,220 @@ class RequestSizeLimitFilterTest {
 		verify(filterChain).doFilter(any(), any());
 	}
 
+	@Test
+	void shouldReturnWithoutWriting_whenCommittedFastPath() throws Exception {
+		MockHttpServletRequest request = apiRequest("x".repeat(101));
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		response.setCommitted(true);
+
+		filter.doFilter(request, response, filterChain);
+
+		verify(filterChain, never()).doFilter(any(), any());
+		assertThat(response.getStatus()).isEqualTo(HttpStatus.OK.value());
+	}
+
+	@Test
+	void shouldFilter_whenContextPathNull() throws Exception {
+		HttpServletRequest request = chunkedRequest("y".repeat(150));
+		when(request.getContextPath()).thenReturn(null);
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		doAnswer(invocation -> {
+			HttpServletRequest wrapped = invocation.getArgument(0);
+			wrapped.getInputStream().readAllBytes();
+			return null;
+		}).when(filterChain).doFilter(any(), any());
+
+		filter.doFilter(request, response, filterChain);
+
+		assertThat(response.getStatus()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE.value());
+	}
+
+	@Test
+	void shouldRethrow_whenDownstreamFailsWithoutCapCause() throws Exception {
+		HttpServletRequest request = chunkedRequest("y".repeat(150));
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		RuntimeException failure = new RuntimeException("downstream blew up");
+		doAnswer(invocation -> {
+			throw failure;
+		}).when(filterChain).doFilter(any(), any());
+
+		assertThatThrownBy(() -> filter.doFilter(request, response, filterChain))
+				.isSameAs(failure);
+		assertThat(response.getStatus()).isEqualTo(HttpStatus.OK.value());
+	}
+
+	@Test
+	void shouldReject413_whenCapCauseIsWrapped() throws Exception {
+		HttpServletRequest request = chunkedRequest("y".repeat(150));
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		doAnswer(invocation -> {
+			HttpServletRequest wrapped = invocation.getArgument(0);
+			try {
+				wrapped.getInputStream().readAllBytes();
+				return null;
+			} catch (DiffTooLargeException e) {
+				throw new IllegalStateException(e);
+			}
+		}).when(filterChain).doFilter(any(), any());
+
+		filter.doFilter(request, response, filterChain);
+
+		assertThat(response.getStatus()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE.value());
+	}
+
+	@Test
+	void shouldRethrow_whenResponseAlreadyCommitted() throws Exception {
+		HttpServletRequest request = chunkedRequest("y".repeat(150));
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		response.setCommitted(true);
+		DiffTooLargeException failure = new DiffTooLargeException("late");
+		doAnswer(invocation -> {
+			throw failure;
+		}).when(filterChain).doFilter(any(), any());
+
+		assertThatThrownBy(() -> filter.doFilter(request, response, filterChain))
+				.isSameAs(failure);
+	}
+
+	@Test
+	void shouldStripContextPath_whenMatching() throws Exception {
+		MockHttpServletRequest request = apiRequest("x".repeat(101));
+		request.setContextPath("/app");
+		request.setRequestURI("/app/api/v1/analyze-diff");
+		MockHttpServletResponse response = new MockHttpServletResponse();
+
+		filter.doFilter(request, response, filterChain);
+
+		verify(filterChain, never()).doFilter(any(), any());
+		assertThat(response.getStatus()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE.value());
+	}
+
+	@Test
+	void shouldFilter_whenContextPathDoesNotMatch() throws Exception {
+		MockHttpServletRequest request = apiRequest("x".repeat(101));
+		request.setContextPath("/other");
+		request.setRequestURI("/api/v1/analyze-diff");
+		MockHttpServletResponse response = new MockHttpServletResponse();
+
+		filter.doFilter(request, response, filterChain);
+
+		verify(filterChain, never()).doFilter(any(), any());
+		assertThat(response.getStatus()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE.value());
+	}
+
+	@Test
+	void shouldEchoRequestIdHeader_whenPresent() throws Exception {
+		HttpServletRequest request = chunkedRequest("y".repeat(150));
+		when(request.getHeader(any())).thenReturn("corr-1");
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		doAnswer(invocation -> {
+			HttpServletRequest wrapped = invocation.getArgument(0);
+			wrapped.getInputStream().readAllBytes();
+			return null;
+		}).when(filterChain).doFilter(any(), any());
+
+		filter.doFilter(request, response, filterChain);
+
+		assertThat(response.getStatus()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE.value());
+		assertThat(response.getContentAsString()).contains("\"requestId\":\"corr-1\"");
+	}
+
+	@Test
+	void shouldOmitRequestId_whenHeaderBlank() throws Exception {
+		HttpServletRequest request = chunkedRequest("y".repeat(150));
+		when(request.getHeader(any())).thenReturn("  ");
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		doAnswer(invocation -> {
+			HttpServletRequest wrapped = invocation.getArgument(0);
+			wrapped.getInputStream().readAllBytes();
+			return null;
+		}).when(filterChain).doFilter(any(), any());
+
+		filter.doFilter(request, response, filterChain);
+
+		assertThat(response.getContentAsString()).contains("\"requestId\":null");
+	}
+
+	@Test
+	void wrapperReader_shouldDecodeWithFallbackCharset() throws Exception {
+		HttpServletRequest request = chunkedRequest("hello");
+		when(request.getCharacterEncoding()).thenReturn(null);
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		ArgumentCaptor<HttpServletRequest> captor = ArgumentCaptor.forClass(HttpServletRequest.class);
+
+		filter.doFilter(request, response, filterChain);
+
+		verify(filterChain).doFilter(captor.capture(), any());
+		HttpServletRequest wrapped = captor.getValue();
+		assertThat(wrapped.getReader().readLine()).isEqualTo("hello");
+		assertThat(wrapped.getReader()).isSameAs(wrapped.getReader());
+		assertThat(wrapped.getInputStream()).isSameAs(wrapped.getInputStream());
+	}
+
+	@Test
+	void wrapperReader_shouldHonorExplicitCharset() throws Exception {
+		HttpServletRequest request = chunkedRequest("hello");
+		when(request.getCharacterEncoding()).thenReturn("  ");
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		ArgumentCaptor<HttpServletRequest> captor = ArgumentCaptor.forClass(HttpServletRequest.class);
+
+		filter.doFilter(request, response, filterChain);
+
+		verify(filterChain).doFilter(captor.capture(), any());
+		assertThat(captor.getValue().getReader().readLine()).isEqualTo("hello");
+	}
+
+	@Test
+	void wrapperReader_shouldDecodeNamedCharset() throws Exception {
+		HttpServletRequest request = chunkedRequest("hello");
+		when(request.getCharacterEncoding()).thenReturn(StandardCharsets.UTF_8.name());
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		ArgumentCaptor<HttpServletRequest> captor = ArgumentCaptor.forClass(HttpServletRequest.class);
+
+		filter.doFilter(request, response, filterChain);
+
+		verify(filterChain).doFilter(captor.capture(), any());
+		assertThat(captor.getValue().getReader().readLine()).isEqualTo("hello");
+	}
+
+	@Test
+	void wrapperStream_shouldDelegateLifecycleMethods() throws Exception {
+		HttpServletRequest request = chunkedRequest("hi");
+		ServletInputStream backing = mock(ServletInputStream.class);
+		when(backing.isFinished()).thenReturn(false);
+		when(backing.isReady()).thenReturn(true);
+		when(request.getInputStream()).thenReturn(backing);
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		ArgumentCaptor<HttpServletRequest> captor = ArgumentCaptor.forClass(HttpServletRequest.class);
+
+		filter.doFilter(request, response, filterChain);
+
+		verify(filterChain).doFilter(captor.capture(), any());
+		ServletInputStream stream = captor.getValue().getInputStream();
+		assertThat(stream.isFinished()).isFalse();
+		assertThat(stream.isReady()).isTrue();
+		stream.setReadListener(mock(ReadListener.class));
+		verify(backing).setReadListener(any(ReadListener.class));
+	}
+
+	@Test
+	void wrapperStream_shouldSupportSingleByteReadsToEndOfStream() throws Exception {
+		HttpServletRequest request = chunkedRequest("hi");
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		ArgumentCaptor<HttpServletRequest> captor = ArgumentCaptor.forClass(HttpServletRequest.class);
+
+		filter.doFilter(request, response, filterChain);
+
+		verify(filterChain).doFilter(captor.capture(), any());
+		ServletInputStream stream = captor.getValue().getInputStream();
+		StringBuilder decoded = new StringBuilder();
+		int b;
+		while ((b = stream.read()) != -1) {
+			decoded.append((char) b);
+		}
+		assertThat(decoded.toString()).isEqualTo("hi");
+	}
+
 	private static MockHttpServletRequest apiRequest(String body) {
 		MockHttpServletRequest request = new MockHttpServletRequest();
 		request.setMethod("POST");
@@ -153,13 +368,13 @@ class RequestSizeLimitFilterTest {
 		HttpServletRequest request = mock(HttpServletRequest.class);
 		when(request.getMethod()).thenReturn("POST");
 		when(request.getRequestURI()).thenReturn("/api/v1/analyze-diff");
-		when(request.getContextPath()).thenReturn("");
+		lenient().when(request.getContextPath()).thenReturn("");
 		when(request.getContentLengthLong()).thenReturn(-1L);
 		lenient().when(request.getCharacterEncoding()).thenReturn(StandardCharsets.UTF_8.name());
 		lenient().when(request.getHeader(any())).thenReturn(null);
 		ServletInputStream backing =
 				new DelegatingServletInputStream(new ByteArrayInputStream(bytes));
-		when(request.getInputStream()).thenReturn(backing);
+		lenient().when(request.getInputStream()).thenReturn(backing);
 		return request;
 	}
 }

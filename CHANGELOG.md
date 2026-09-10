@@ -33,6 +33,18 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 - Provider API keys no longer default to the `"default-value"` placeholder;
   missing keys fail fast via `AppStartupCheck`
 
+### Testing
+
+- JaCoCo 0.8.15 gate: ≥90% line and branch coverage enforced per class and
+  bundle at `verify` (build fails otherwise); sole exclusion is the
+  application bootstrap class
+- ~260 new tests: slice/unit coverage for filters, guardrails, mappers,
+  services, CLI, and configuration boundaries (386 total, 0 failures)
+- `CliRunner` now propagates exit codes via Spring's `ExitCodeGenerator`
+  (graceful shutdown) instead of calling `System.exit` directly
+- Fixed `final` picocli `@Option` fields that rejected every CLI invocation;
+  adopted Spring 7 `CONTENT_TOO_LARGE` / `UNPROCESSABLE_CONTENT` constants
+
 ### Security
 
 - Secret scanner now detects obfuscated secrets (base64, ROT13, and

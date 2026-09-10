@@ -154,4 +154,84 @@ public class GitServiceTest {
 
 		Thread.sleep(50);
 	}
+
+	@Test
+	void getDiffAgainstBranch_withNonExistentBranch_shouldThrow() {
+		assertThrows(
+				GitService.GitExitCodeException.class,
+				() -> gitService.getDiffAgainstBranch("non-existing-branch-12345")
+		);
+	}
+
+	@Test
+	void getCurrentBranchName_withDetachedHead_shouldFallBack() throws Exception {
+		createAndStageFile("initial.txt", "initial");
+		runGitCommand("commit", "-m", "initial commit");
+		runGitCommand("checkout", "--detach");
+
+		assertEquals("HEAD", gitService.getCurrentBranchName());
+	}
+
+	@Test
+	void isGitRepository_withMissingWorkingDirectory_shouldReturnFalse() {
+		GitService broken = new GitService(30, "no-such-dir-xyz-123");
+
+		assertFalse(broken.isGitRepository());
+	}
+
+	@Test
+	void constructors_shouldDetectWorkingDirectory() {
+		GitService detected = new GitService(30);
+
+		assertNotNull(detected);
+	}
+
+	@Test
+	void constructor_shouldAcceptDirectoryOnly() {
+		GitService single = new GitService(tempDir.toString());
+
+		assertNotNull(single);
+	}
+
+	@Test
+	void resolveWorkingDirectory_shouldPreferValidPwd() {
+		assertEquals(tempDir.toString(), GitService.resolveWorkingDirectory(tempDir.toString()));
+	}
+
+	@Test
+	void resolveWorkingDirectory_shouldFallBack_whenPwdMissingOrInvalid(@TempDir Path other) throws Exception {
+		String fallback = GitService.resolveWorkingDirectory(null);
+		assertNotNull(fallback);
+		assertEquals(fallback, GitService.resolveWorkingDirectory(""));
+		assertEquals(fallback, GitService.resolveWorkingDirectory("no-such-dir-xyz-123"));
+
+		Path plainFile = other.resolve("file.txt");
+		Files.writeString(plainFile, "x");
+		assertEquals(fallback, GitService.resolveWorkingDirectory(plainFile.toString()));
+	}
+
+	@Test
+	void hasStagedChanges_withNonGitDirectory_shouldReturnFalse(@TempDir Path nonGitDir) {
+		GitService nonGitService = new GitService(30, nonGitDir.toString());
+
+		assertFalse(nonGitService.hasStagedChanges());
+	}
+
+	@Test
+	void hasStagedChanges_withTimeout_shouldReturnFalse() {
+		GitService impatient = new GitService(0, tempDir.toString());
+
+		assertFalse(impatient.hasStagedChanges());
+	}
+
+	@Test
+	void runCommand_shouldThrow_whenTimeoutExpires() {
+		GitService impatient = new GitService(0, tempDir.toString());
+
+		RuntimeException exception = assertThrows(
+				RuntimeException.class,
+				impatient::getStagedDiff
+		);
+		assertTrue(exception.getMessage().contains("Timeout while waiting"));
+	}
 }

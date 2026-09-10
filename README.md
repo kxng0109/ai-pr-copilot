@@ -452,7 +452,18 @@ printed in the release notes.
 
 ## Testing
 
-`mvn test` runs 101 tests (0 failures). Two additional suites exist:
+`mvn test` runs 386 tests (0 failures). Coverage is enforced by JaCoCo 0.8.15:
+**≥90% line and branch coverage per class and bundle**, failing the build
+otherwise. The application bootstrap class is the sole exclusion (wiring only,
+verified by context-load instead).
+
+```powershell
+.\mvnw.cmd test "-Dtest=SecretScanServiceTest" "-Djacoco.skip=true" -q  # single class, no gate
+.\mvnw.cmd clean verify -q                                              # full suite + gate (CI must use this)
+```
+
+Reports land in `target/site/jacoco/` (`index.html`, `jacoco.csv`, `jacoco.xml`).
+Two additional suites exist:
 
 **Provider smoke tests** (`ProviderSmokeTest`) — hit REAL provider endpoints.
 Opt-in only: the class runs solely when `AI_PROVIDER_KEY` is set, so a
@@ -467,7 +478,7 @@ not regress below a pinned baseline. A JSON report is written to
 `target/security-eval.json`. Per OWASP LLM01:2026, deterministic prevention
 of prompt injection is impossible, so the harness reports bypass rate rather
 than claiming zero bypasses. Current measurements: secret-scan 6/7,
-obfuscation 0/3, injection 3/5.
+obfuscation 3/3, injection 3/5.
 
 ## License
 

@@ -37,7 +37,10 @@ public class AiPrCopilotApplication {
 			System.setProperty("app.skip-startup-check", "true");
 		}
 
-		// CliRunner (CommandLineRunner) runs the command and exits; no manual wiring here.
-		app.run(args);
+		// CliRunner (CommandLineRunner + ExitCodeGenerator) runs the command and
+		// supplies the process status; exit() closes the context gracefully first.
+		// Server mode intentionally keeps plain run(): it is long-lived and must
+		// not exit after startup.
+		System.exit(SpringApplication.exit(app.run(args)));
 	}
 }
