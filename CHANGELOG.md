@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Deterministic adversarial evaluation harness (`GuardrailEvalTest`) measuring
+  secret-scan recall, obfuscation bypass, and injection denylist coverage
+  against a pinned baseline; emits `target/security-eval.json`
+- Opt-in provider smoke tests (`ProviderSmokeTest`) that run only when
+  `AI_PROVIDER_KEY` is set, so credential-less CI never touches a network
+- k6 load/SLO script (`k6/load.js`) with smoke, load, and stress scenarios
+  capturing p50/p95/p99 latency and SSE time-to-first-byte
+
 ## [1.0.0] - 2026-09-10
 
 ### Features

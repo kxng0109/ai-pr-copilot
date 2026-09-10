@@ -422,14 +422,6 @@ for stable only). `-rc` tags publish as prereleases and never touch `latest`.
 Verify a JAR with `sha256sum -c` and the `cosign verify-blob` command
 printed in the release notes.
 
-## Testing
-
-Unit and integration tests are included. Run:
-
-```bash
-mvn test
-```
-
 ## Architecture Overview
 
 - Controller: `DiffAnalysisController` (`/analyze-diff`, `/analyze-diff/sarif`, `/analyze-diff/stream`)
@@ -440,6 +432,30 @@ mvn test
 - CLI: `CliRunner`, `AnalyzeCommand` (`--base/--staged/--uncommitted/--format/--quiet`), Boot-4 factory in `cli.picocli4`
 - Error handling: `GlobalExceptionHandler`
 - Uses Spring AI 2.0 to switch between providers (Google Gemini via `GoogleGenAiChatModel`, Vertex mode)
+
+## Testing
+
+`mvn test` runs 101 tests (0 failures). Two additional suites exist:
+
+**Provider smoke tests** (`ProviderSmokeTest`) — hit REAL provider endpoints.
+Opt-in only: the class runs solely when `AI_PROVIDER_KEY` is set, so a
+credential-less CI run never touches a network and never leaks a key into
+a report. Keys arrive via env vars, never committed. Each test makes exactly
+one real call and asserts on response shape, never on model content.
+
+**Security eval harness** (`GuardrailEvalTest`) — deterministic, LLM-free
+adversarial evaluation. Measures secret-scan recall, obfuscation bypass, and
+injection denylist coverage, then asserts only that the current numbers do
+not regress below a pinned baseline. A JSON report is written to
+`target/security-eval.json`. Per OWASP LLM01:2026, deterministic prevention
+of prompt injection is impossible, so the harness reports bypass rate rather
+than claiming zero bypasses. Current measurements: secret-scan 6/7,
+obfuscation 0/3, injection 3/5.
+
+**Load/SLO** (`k6/load.js`) — smoke, load and stress scenarios capturing
+`http_req_duration` p50/p95/p99 and `http_req_waiting` as SSE
+time-to-first-token. The SLO numbers are a proposed starting point, not a
+measurement; see `k6/README.md` before trusting them.
 
 ## License
 
