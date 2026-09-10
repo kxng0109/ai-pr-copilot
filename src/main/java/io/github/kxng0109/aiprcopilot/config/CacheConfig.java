@@ -14,14 +14,25 @@ import org.springframework.context.annotation.Configuration;
 @RequiredArgsConstructor
 public class CacheConfig {
 
-    private final PrCopilotAnalysisProperties analysisProperties;
+	private final PrCopilotAnalysisProperties analysisProperties;
 
-    @Bean
-    public Cache<String, AnalyzeDiffResponse> analysisCache() {
-        return Caffeine.newBuilder()
-                .maximumSize(Math.max(1, analysisProperties.getCacheMaxSize()))
-                .expireAfterWrite(analysisProperties.getCacheTtl())
-                .recordStats()
-                .build();
-    }
+	@Bean
+	public Cache<String, AnalyzeDiffResponse> analysisCache() {
+		int maxSize = analysisProperties.getCacheMaxSize();
+		if (maxSize == 0) {
+			// Caffeine's documented disable mechanism: size zero evicts immediately.
+			// Synchronous executor gives deterministic no-hit semantics instead of
+			// the default async-eviction window on ForkJoinPool.commonPool().
+			return Caffeine.newBuilder()
+			               .maximumSize(0)
+			               .executor(Runnable::run)
+			               .recordStats()
+			               .build();
+		}
+		return Caffeine.newBuilder()
+		               .maximumSize(maxSize)
+		               .expireAfterWrite(analysisProperties.getCacheTtl())
+		               .recordStats()
+		               .build();
+	}
 }

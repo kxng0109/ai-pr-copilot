@@ -10,14 +10,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 @SpringBootTest
 public class PrCopilotAnalysisPropertiesTest {
-    @Autowired
-    private PrCopilotAnalysisProperties prCopilotAnalysisProperties;
+	@Autowired
+	private PrCopilotAnalysisProperties prCopilotAnalysisProperties;
 
-    @Test
-    void shouldBindDefaultsFromApplicationYaml() {
-        assertEquals("en", prCopilotAnalysisProperties.getDefaultLanguage());
-        assertEquals(50000, prCopilotAnalysisProperties.getMaxDiffChars());
-        assertEquals("conventional-commits", prCopilotAnalysisProperties.getDefaultStyle());
-        assertFalse(prCopilotAnalysisProperties.isIncludeRawModelOutput());
-    }
+	@Test
+	void shouldBindDefaultsFromApplicationYaml() {
+		assertEquals("en", prCopilotAnalysisProperties.getDefaultLanguage());
+		assertEquals(50000, prCopilotAnalysisProperties.getMaxDiffChars());
+		assertEquals("conventional-commits", prCopilotAnalysisProperties.getDefaultStyle());
+		assertFalse(prCopilotAnalysisProperties.isIncludeRawModelOutput());
+	}
 }

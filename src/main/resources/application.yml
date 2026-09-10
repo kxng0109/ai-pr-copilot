@@ -5,7 +5,8 @@ management:
         include: health, info, prometheus, caches
   info:
     env:
-      enabled: true
+      # Disabled in production: even sanitized env exposure widens the info surface.
+      enabled: false
 
 info:
   project:
@@ -26,6 +27,9 @@ prcopilot:
   analysis:
     # The maximum allowed diff size in characters; above this you can reject or truncate
     max-diff-chars: ${PRCOPILOT_ANALYSIS_MAX_DIFF_CHARS:50000}
+    # Hard byte ceiling on /api/v1/** JSON request bodies, enforced before
+    # deserialization (DoS guard; must comfortably exceed max-diff-chars + JSON overhead)
+    max-request-bytes: ${PRCOPILOT_ANALYSIS_MAX_REQUEST_BYTES:262144}
     default-language: ${PRCOPILOT_ANALYSIS_DEFAULT_LANGUAGE:en}
     # The default "style" for titles/descriptions
     default-style: ${PRCOPILOT_ANALYSIS_DEFAULT_STYLE:conventional-commits}
@@ -33,6 +37,10 @@ prcopilot:
     include-raw-model-output: ${PRCOPILOT_ANALYSIS_INCLUDE_RAW_MODEL_OUTPUT:false}
     # Hard ceiling on model output chars parsed (DoS guard; model maxTokens bounds this anyway)
     max-model-output-chars: ${PRCOPILOT_ANALYSIS_MAX_MODEL_OUTPUT_CHARS:1000000}
+    # Hard ceilings on model-provided list sizes (DoS guard against list-bomb payloads)
+    max-risks: ${PRCOPILOT_ANALYSIS_MAX_RISKS:200}
+    max-suggested-tests: ${PRCOPILOT_ANALYSIS_MAX_SUGGESTED_TESTS:100}
+    max-touched-files: ${PRCOPILOT_ANALYSIS_MAX_TOUCHED_FILES:500}
     # Diff-hash response cache (0 = disabled)
     cache-max-size: ${PRCOPILOT_CACHE_DIFF_MAX_SIZE:1000}
     cache-ttl: ${PRCOPILOT_CACHE_DIFF_TTL:30m}
@@ -54,14 +62,14 @@ prcopilot:
     temperature: ${AI_TEMPERATURE:0.1}
     max-tokens: ${AI_MAX_TOKENS:1024}
     timeout-millis: ${AI_TIMEOUT_MILLIS:30000}
+    # Opt-in startup reachability ping of provider base URLs (warn-only, never fails startup)
+    health-check-ping: ${PRCOPILOT_AI_HEALTH_CHECK_PING:false}
     # Concurrency bulkheads (fail-fast 429 when full)
     bulkhead-saas-max-concurrent: ${PRCOPILOT_AI_BULKHEAD_SAAS_MAX_CONCURRENT:15}
     bulkhead-ollama-max-concurrent: ${PRCOPILOT_AI_BULKHEAD_OLLAMA_MAX_CONCURRENT:3}
     bulkhead-max-wait-millis: ${PRCOPILOT_AI_BULKHEAD_MAX_WAIT_MILLIS:0}
-    # API rate limit (per instance)
-    ratelimit-for-period: ${PRCOPILOT_RATELIMITER_LIMIT_FOR_PERIOD:30}
-    ratelimit-refresh-period: ${PRCOPILOT_RATELIMITER_REFRESH_PERIOD:1m}
-    ratelimit-timeout-millis: ${PRCOPILOT_RATELIMITER_TIMEOUT_MILLIS:0}
+    # API rate limiting is configured exclusively via the resilience4j.ratelimiter
+    # block below (Duration-typed, startup-validated); no duplicates here.
 
   prompts:
     system-prompt: classpath:prompts/system-prompt.txt
@@ -89,16 +97,16 @@ spring:
       connect-timeout: ${SPRING_HTTP_CLIENTS_CONNECT_TIMEOUT:5s}
       read-timeout: ${SPRING_HTTP_CLIENTS_READ_TIMEOUT:40s}
   ai:
-    model:
-      chat: ${SPRING_AI_MODEL_CHAT:}
     openai:
-      api-key: ${OPENAI_API_KEY:default-value}
+      # No default: AppStartupCheck fails fast with a clear message when unset.
+      api-key: ${OPENAI_API_KEY:}
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}
       chat:
         model: ${OPENAI_MODEL:gpt-4o-mini}
 
     anthropic:
-      api-key: ${ANTHROPIC_API_KEY:default-value}
+      # No default: AppStartupCheck fails fast with a clear message when unset.
+      api-key: ${ANTHROPIC_API_KEY:}
       base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
       chat:
         model: ${ANTHROPIC_MODEL:claude-sonnet-4-0}

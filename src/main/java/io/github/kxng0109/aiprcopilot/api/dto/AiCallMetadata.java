@@ -12,9 +12,9 @@ import lombok.Builder;
  */
 @Builder
 public record AiCallMetadata(
-        String modelName,
-        String provider,
-        long modelLatencyMs,
-        Integer tokensUsed
+		String modelName,
+		String provider,
+		long modelLatencyMs,
+		Integer tokensUsed
 ) {
 }

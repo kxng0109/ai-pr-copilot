@@ -28,285 +28,328 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class DiffResponseMapperServiceTest {
 
-    @Mock
-    private PrCopilotLoggingProperties loggingProperties;
+	@Mock
+	private PrCopilotLoggingProperties loggingProperties;
 
-    @Mock
-    private PrCopilotAnalysisProperties analysisProperties;
+	@Mock
+	private PrCopilotAnalysisProperties analysisProperties;
 
-    private ObjectMapper objectMapper;
-    private DiffResponseMapperService mapperService;
+	private ObjectMapper objectMapper;
+	private DiffResponseMapperService mapperService;
 
-    @BeforeEach
-    void setup() {
-        objectMapper = JsonMapper.builder().build();
+	@BeforeEach
+	void setup() {
+		objectMapper = JsonMapper.builder().build();
 
-        lenient().when(analysisProperties.isIncludeRawModelOutput()).thenReturn(false);
-        lenient().when(analysisProperties.getMaxModelOutputChars()).thenReturn(1000000);
-        lenient().when(loggingProperties.isLogResponses()).thenReturn(false);
+		lenient().when(analysisProperties.isIncludeRawModelOutput()).thenReturn(false);
+		lenient().when(analysisProperties.getMaxModelOutputChars()).thenReturn(1000000);
+		lenient().when(analysisProperties.getMaxRisks()).thenReturn(200);
+		lenient().when(analysisProperties.getMaxSuggestedTests()).thenReturn(100);
+		lenient().when(analysisProperties.getMaxTouchedFiles()).thenReturn(500);
+		lenient().when(loggingProperties.isLogResponses()).thenReturn(false);
 
-        mapperService = new DiffResponseMapperService(
-                objectMapper,
-                loggingProperties,
-                analysisProperties
-        );
-    }
+		mapperService = new DiffResponseMapperService(
+				objectMapper,
+				loggingProperties,
+				analysisProperties
+		);
+	}
 
-    @Test
-    void mapToAnalyzeDiffResponse_shouldParseValidJsonResponse() {
-        String validJson = """
-                {
-                  "title": "feat: add new feature",
-                  "summary": "Added a new feature to the system",
-                  "details": "Detailed implementation of the feature",
-                  "risks": [{"level": "warning", "message": "Risk 1"}, {"level": "error", "message": "Risk 2"}],
-                  "suggestedTests": ["Test 1", "Test 2"],
-                  "touchedFiles": ["file1.java", "file2.java"],
-                  "analysisNotes": "Some notes"
-                }
-                """;
+	@Test
+	void mapToAnalyzeDiffResponse_shouldParseValidJsonResponse() {
+		String validJson = """
+				{
+				  "title": "feat: add new feature",
+				  "summary": "Added a new feature to the system",
+				  "details": "Detailed implementation of the feature",
+				  "risks": [{"level": "warning", "message": "Risk 1"}, {"level": "error", "message": "Risk 2"}],
+				  "suggestedTests": ["Test 1", "Test 2"],
+				  "touchedFiles": ["file1.java", "file2.java"],
+				  "analysisNotes": "Some notes"
+				}
+				""";
 
-        ChatResponse response = createChatResponse(validJson);
-        String diff = "diff --git a/file1.java b/file1.java";
+		ChatResponse response = createChatResponse(validJson);
+		String diff = "diff --git a/file1.java b/file1.java";
 
-        AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
-                response, 1000L, diff, "req-1", "openai"
-        );
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				response, 1000L, diff, "req-1", "openai"
+		);
 
-        assertNotNull(result);
-        assertEquals("feat: add new feature", result.title());
-        assertEquals("Added a new feature to the system", result.summary());
-        assertEquals("Detailed implementation of the feature", result.details());
-        assertThat(result.risks()).containsExactly(
-                new io.github.kxng0109.aiprcopilot.api.dto.RiskItem("warning", "Risk 1"),
-                new io.github.kxng0109.aiprcopilot.api.dto.RiskItem("error", "Risk 2"));
-        assertThat(result.riskScore()).isEqualTo(35);
-        assertThat(result.suggestedTests()).containsExactly("Test 1", "Test 2");
-        assertThat(result.touchedFiles()).containsExactly("file1.java", "file2.java");
-        assertEquals("Some notes", result.analysisNotes());
-        assertEquals("req-1", result.requestId());
-        assertEquals("openai", result.metadata().provider());
-        assertEquals(1000L, result.metadata().modelLatencyMs());
-    }
+		assertNotNull(result);
+		assertEquals("feat: add new feature", result.title());
+		assertEquals("Added a new feature to the system", result.summary());
+		assertEquals("Detailed implementation of the feature", result.details());
+		assertThat(result.risks()).containsExactly(
+				new io.github.kxng0109.aiprcopilot.api.dto.RiskItem("warning", "Risk 1"),
+				new io.github.kxng0109.aiprcopilot.api.dto.RiskItem("error", "Risk 2")
+		);
+		assertThat(result.riskScore()).isEqualTo(35);
+		assertThat(result.suggestedTests()).containsExactly("Test 1", "Test 2");
+		assertThat(result.touchedFiles()).containsExactly("file1.java", "file2.java");
+		assertEquals("Some notes", result.analysisNotes());
+		assertEquals("req-1", result.requestId());
+		assertEquals("openai", result.metadata().provider());
+		assertEquals(1000L, result.metadata().modelLatencyMs());
+	}
 
-    @Test
-    void mapToAnalyzeDiffResponse_shouldExtractTouchedFiles_whenNotProvidedByModel() {
-        String jsonWithoutFiles = """
-                {
-                  "title": "test",
-                  "summary": "summary",
-                  "details": "details",
-                  "risks": [],
-                  "suggestedTests": [],
-                  "touchedFiles": [],
-                  "analysisNotes": null
-                }
-                """;
+	@Test
+	void mapToAnalyzeDiffResponse_shouldExtractTouchedFiles_whenNotProvidedByModel() {
+		String jsonWithoutFiles = """
+				{
+				  "title": "test",
+				  "summary": "summary",
+				  "details": "details",
+				  "risks": [],
+				  "suggestedTests": [],
+				  "touchedFiles": [],
+				  "analysisNotes": null
+				}
+				""";
 
-        String diff = """
-                diff --git a/src/main/File1.java b/src/main/File1.java
-                index abc..def
-                --- a/src/main/File1.java
-                +++ b/src/main/File1.java
-                diff --git a/src/test/File2.java b/src/test/File2.java
-                """;
+		String diff = """
+				diff --git a/src/main/File1.java b/src/main/File1.java
+				index abc..def
+				--- a/src/main/File1.java
+				+++ b/src/main/File1.java
+				diff --git a/src/test/File2.java b/src/test/File2.java
+				""";
 
-        ChatResponse response = createChatResponse(jsonWithoutFiles);
+		ChatResponse response = createChatResponse(jsonWithoutFiles);
 
-        AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
-                response, 500L, diff, "req-2", "anthropic"
-        );
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				response, 500L, diff, "req-2", "anthropic"
+		);
 
-        assertThat(result.touchedFiles()).containsExactly(
-                "src/main/File1.java",
-                "src/test/File2.java"
-        );
-    }
+		assertThat(result.touchedFiles()).containsExactly(
+				"src/main/File1.java",
+				"src/test/File2.java"
+		);
+	}
 
-    @Test
-    void mapToAnalyzeDiffResponse_shouldSanitizeJsonWithMarkdownFences() {
-        String jsonWithFences = """
-                ```json
-                {
-                  "title": "test",
-                  "summary": "summary",
-                  "details": "details",
-                  "risks": [],
-                  "suggestedTests": [],
-                  "touchedFiles": [],
-                  "analysisNotes": null
-                }
-                ```
-                """;
+	@Test
+	void mapToAnalyzeDiffResponse_shouldSanitizeJsonWithMarkdownFences() {
+		String jsonWithFences = """
+				```json
+				{
+				  "title": "test",
+				  "summary": "summary",
+				  "details": "details",
+				  "risks": [],
+				  "suggestedTests": [],
+				  "touchedFiles": [],
+				  "analysisNotes": null
+				}
+				```
+				""";
 
-        ChatResponse response = createChatResponse(jsonWithFences);
+		ChatResponse response = createChatResponse(jsonWithFences);
 
-        AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
-                response, 100L, "diff", "req-3", "gemini"
-        );
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				response, 100L, "diff", "req-3", "gemini"
+		);
 
-        assertNotNull(result);
-        assertEquals("test", result.title());
-    }
+		assertNotNull(result);
+		assertEquals("test", result.title());
+	}
 
-    @Test
-    void mapToAnalyzeDiffResponse_shouldExtractJsonFromSurroundingText() {
-        String responseWithExtra = """
-                Sure, here's the analysis:
-                
-                {
-                  "title": "test",
-                  "summary": "summary",
-                  "details": "details",
-                  "risks": [],
-                  "suggestedTests": [],
-                  "touchedFiles": [],
-                  "analysisNotes": null
-                }
-                
-                Hope this helps!
-                """;
+	@Test
+	void mapToAnalyzeDiffResponse_shouldExtractJsonFromSurroundingText() {
+		String responseWithExtra = """
+				Sure, here's the analysis:
+				
+				{
+				  "title": "test",
+				  "summary": "summary",
+				  "details": "details",
+				  "risks": [],
+				  "suggestedTests": [],
+				  "touchedFiles": [],
+				  "analysisNotes": null
+				}
+				
+				Hope this helps!
+				""";
 
-        ChatResponse response = createChatResponse(responseWithExtra);
+		ChatResponse response = createChatResponse(responseWithExtra);
 
-        AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
-                response, 100L, "diff", "req-4", "openai"
-        );
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				response, 100L, "diff", "req-4", "openai"
+		);
 
-        assertNotNull(result);
-        assertEquals("test", result.title());
-    }
+		assertNotNull(result);
+		assertEquals("test", result.title());
+	}
 
-    @Test
-    void mapToAnalyzeDiffResponse_shouldIncludeRawOutput_whenConfigured() {
-        when(analysisProperties.isIncludeRawModelOutput()).thenReturn(true);
+	@Test
+	void mapToAnalyzeDiffResponse_shouldIncludeRawOutput_whenConfigured() {
+		when(analysisProperties.isIncludeRawModelOutput()).thenReturn(true);
 
-        String json = """
-                {"title":"test","summary":"s","details":"d","risks":[],"suggestedTests":[],"touchedFiles":[],"analysisNotes":null}
-                """;
+		String json = """
+				{"title":"test","summary":"s","details":"d","risks":[],"suggestedTests":[],"touchedFiles":[],"analysisNotes":null}
+				""";
 
-        ChatResponse response = createChatResponse(json);
+		ChatResponse response = createChatResponse(json);
 
-        AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
-                response, 100L, "diff", "req-5", "openai"
-        );
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				response, 100L, "diff", "req-5", "openai"
+		);
 
-        assertNotNull(result.rawModelOutput());
-        assertThat(result.rawModelOutput()).contains("test");
-    }
+		assertNotNull(result.rawModelOutput());
+		assertThat(result.rawModelOutput()).contains("test");
+	}
 
-    @Test
-    void mapToAnalyzeDiffResponse_shouldThrowException_whenJsonIsInvalid() {
-        String invalidJson = "not valid json at all";
-        ChatResponse response = createChatResponse(invalidJson);
+	@Test
+	void mapToAnalyzeDiffResponse_shouldThrowException_whenJsonIsInvalid() {
+		String invalidJson = "not valid json at all";
+		ChatResponse response = createChatResponse(invalidJson);
 
-        assertThrows(ModelOutputParseException.class, () ->
-                mapperService.mapToAnalyzeDiffResponse(
-                        response, 100L, "diff", "req-6", "openai"
-                )
-        );
-    }
+		assertThrows(
+				ModelOutputParseException.class, () ->
+						mapperService.mapToAnalyzeDiffResponse(
+								response, 100L, "diff", "req-6", "openai"
+						)
+		);
+	}
 
-    @Test
-    void mapToAnalyzeDiffResponse_shouldThrowException_whenRequiredFieldsMissing() {
-        String incompleteJson = """
-                {
-                  "title": "test"
-                }
-                """;
+	@Test
+	void mapToAnalyzeDiffResponse_shouldThrowException_whenRequiredFieldsMissing() {
+		String incompleteJson = """
+				{
+				  "title": "test"
+				}
+				""";
 
-        ChatResponse response = createChatResponse(incompleteJson);
+		ChatResponse response = createChatResponse(incompleteJson);
 
-        ModelOutputParseException exception = assertThrows(
-                ModelOutputParseException.class,
-                () -> mapperService.mapToAnalyzeDiffResponse(
-                        response, 100L, "diff", "req-7", "openai"
-                )
-        );
+		ModelOutputParseException exception = assertThrows(
+				ModelOutputParseException.class,
+				() -> mapperService.mapToAnalyzeDiffResponse(
+						response, 100L, "diff", "req-7", "openai"
+				)
+		);
 
-        assertThat(exception.getMessage()).contains("missing required fields");
-    }
+		assertThat(exception.getMessage()).contains("missing required fields");
+	}
 
-    @Test
-    void mapToAnalyzeDiffResponse_shouldHandleNullTokenUsage() {
-        String json = """
-                {"title":"test","summary":"s","details":"d","risks":[],"suggestedTests":[],"touchedFiles":[],"analysisNotes":null}
-                """;
+	@Test
+	void mapToAnalyzeDiffResponse_shouldHandleNullTokenUsage() {
+		String json = """
+				{"title":"test","summary":"s","details":"d","risks":[],"suggestedTests":[],"touchedFiles":[],"analysisNotes":null}
+				""";
 
-        ChatResponse response = createChatResponseWithNullUsage(json);
+		ChatResponse response = createChatResponseWithNullUsage(json);
 
-        AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
-                response, 100L, "diff", "req-8", "ollama"
-        );
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				response, 100L, "diff", "req-8", "ollama"
+		);
 
-        assertNotNull(result);
-        assertNull(result.metadata().tokensUsed());
-    }
+		assertNotNull(result);
+		assertNull(result.metadata().tokensUsed());
+	}
 
-    @Test
-    void mapToAnalyzeDiffResponse_shouldNormalizeRiskLevels() {
-        String json = """
-                {"title":"test","summary":"s","details":"d",
-                 "risks":[{"level":"CRITICAL","message":" SQL injection "},{"level":"Medium","message":"slow query"}],
-                 "suggestedTests":[],"touchedFiles":[],"analysisNotes":null}
-                """;
+	@Test
+	void mapToAnalyzeDiffResponse_shouldNormalizeRiskLevels() {
+		String json = """
+				{"title":"test","summary":"s","details":"d",
+				 "risks":[{"level":"CRITICAL","message":" SQL injection "},{"level":"Medium","message":"slow query"}],
+				 "suggestedTests":[],"touchedFiles":[],"analysisNotes":null}
+				""";
 
-        ChatResponse response = createChatResponse(json);
+		ChatResponse response = createChatResponse(json);
 
-        AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
-                response, 100L, "diff", "req-9", "openai"
-        );
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				response, 100L, "diff", "req-9", "openai"
+		);
 
-        assertThat(result.risks()).containsExactly(
-                new io.github.kxng0109.aiprcopilot.api.dto.RiskItem("error", "SQL injection"),
-                new io.github.kxng0109.aiprcopilot.api.dto.RiskItem("warning", "slow query"));
-        assertThat(result.riskScore()).isEqualTo(35);
-    }
+		assertThat(result.risks()).containsExactly(
+				new io.github.kxng0109.aiprcopilot.api.dto.RiskItem("error", "SQL injection"),
+				new io.github.kxng0109.aiprcopilot.api.dto.RiskItem("warning", "slow query")
+		);
+		assertThat(result.riskScore()).isEqualTo(35);
+	}
 
-    @Test
-    void mapToAnalyzeDiffResponse_shouldThrowException_whenRiskLevelUnknown() {
-        String json = """
-                {"title":"test","summary":"s","details":"d",
-                 "risks":[{"level":"catastrophic","message":"boom"}],
-                 "suggestedTests":[],"touchedFiles":[],"analysisNotes":null}
-                """;
+	@Test
+	void mapToAnalyzeDiffResponse_shouldTruncateOversizedLists() {
+		StringBuilder risks = new StringBuilder();
+		for (int i = 0; i < 250; i++) {
+			if (i > 0) {
+				risks.append(',');
+			}
+			risks.append("{\"level\":\"note\",\"message\":\"risk ").append(i).append("\"}");
+		}
+		StringBuilder tests = new StringBuilder();
+		for (int i = 0; i < 120; i++) {
+			if (i > 0) {
+				tests.append(',');
+			}
+			tests.append("\"test ").append(i).append("\"");
+		}
+		StringBuilder files = new StringBuilder();
+		for (int i = 0; i < 600; i++) {
+			if (i > 0) {
+				files.append(',');
+			}
+			files.append("\"file").append(i).append(".java\"");
+		}
+		String json = "{\"title\":\"test\",\"summary\":\"s\",\"details\":\"d\","
+				+ "\"risks\":[" + risks + "],"
+				+ "\"suggestedTests\":[" + tests + "],"
+				+ "\"touchedFiles\":[" + files + "],\"analysisNotes\":null}";
 
-        ChatResponse response = createChatResponse(json);
+		AnalyzeDiffResponse result = mapperService.mapToAnalyzeDiffResponse(
+				createChatResponse(json), 100L, "diff", "req-cap", "openai");
 
-        assertThrows(ModelOutputParseException.class, () ->
-                mapperService.mapToAnalyzeDiffResponse(
-                        response, 100L, "diff", "req-10", "openai"
-                )
-        );
-    }
+		assertThat(result.risks()).hasSize(200);
+		assertThat(result.suggestedTests()).hasSize(100);
+		assertThat(result.touchedFiles()).hasSize(500);
+	}
 
-    private ChatResponse createChatResponse(String content) {
-        Generation generation = new Generation(new AssistantMessage(content));
+	@Test
+	void mapToAnalyzeDiffResponse_shouldThrowException_whenRiskLevelUnknown() {
+		String json = """
+				{"title":"test","summary":"s","details":"d",
+				 "risks":[{"level":"catastrophic","message":"boom"}],
+				 "suggestedTests":[],"touchedFiles":[],"analysisNotes":null}
+				""";
 
-        Usage usage = new DefaultUsage(10, 20, 30);
+		ChatResponse response = createChatResponse(json);
 
-        ChatResponseMetadata metadata = ChatResponseMetadata.builder()
-                                                            .model("test-model")
-                                                            .usage(usage)
-                                                            .build();
+		assertThrows(
+				ModelOutputParseException.class, () ->
+						mapperService.mapToAnalyzeDiffResponse(
+								response, 100L, "diff", "req-10", "openai"
+						)
+		);
+	}
 
-        return ChatResponse.builder()
-                           .generations(List.of(generation))
-                           .metadata(metadata)
-                           .build();
-    }
+	private ChatResponse createChatResponse(String content) {
+		Generation generation = new Generation(new AssistantMessage(content));
 
-    private ChatResponse createChatResponseWithNullUsage(String content) {
-        Generation generation = new Generation(new AssistantMessage(content));
+		Usage usage = new DefaultUsage(10, 20, 30);
 
-        ChatResponseMetadata metadata = ChatResponseMetadata.builder()
-                                                            .model("ollama-model")
-                                                            .usage(null)
-                                                            .build();
+		ChatResponseMetadata metadata = ChatResponseMetadata.builder()
+		                                                    .model("test-model")
+		                                                    .usage(usage)
+		                                                    .build();
 
-        return ChatResponse.builder()
-                           .generations(List.of(generation))
-                           .metadata(metadata)
-                           .build();
-    }
+		return ChatResponse.builder()
+		                   .generations(List.of(generation))
+		                   .metadata(metadata)
+		                   .build();
+	}
+
+	private ChatResponse createChatResponseWithNullUsage(String content) {
+		Generation generation = new Generation(new AssistantMessage(content));
+
+		ChatResponseMetadata metadata = ChatResponseMetadata.builder()
+		                                                    .model("ollama-model")
+		                                                    .usage(null)
+		                                                    .build();
+
+		return ChatResponse.builder()
+		                   .generations(List.of(generation))
+		                   .metadata(metadata)
+		                   .build();
+	}
 }

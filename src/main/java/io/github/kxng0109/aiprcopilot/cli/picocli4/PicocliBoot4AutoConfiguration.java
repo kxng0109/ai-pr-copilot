@@ -12,9 +12,9 @@ import picocli.CommandLine;
 @AutoConfiguration
 public class PicocliBoot4AutoConfiguration {
 
-    @Bean
-    @ConditionalOnMissingBean(CommandLine.IFactory.class)
-    public CommandLine.IFactory picocliSpringFactory(ApplicationContext applicationContext) {
-        return new PicocliSpringFactory(applicationContext);
-    }
+	@Bean
+	@ConditionalOnMissingBean(CommandLine.IFactory.class)
+	public CommandLine.IFactory picocliSpringFactory(ApplicationContext applicationContext) {
+		return new PicocliSpringFactory(applicationContext);
+	}
 }

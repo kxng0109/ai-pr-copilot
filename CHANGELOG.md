@@ -8,13 +8,30 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- Byte-level request body cap (`RequestSizeLimitFilter`, 413) enforced before
+  JSON deserialization; configurable via `PRCOPILOT_ANALYSIS_MAX_REQUEST_BYTES`
+- Configurable ceilings on model-provided list sizes (`PRCOPILOT_ANALYSIS_MAX_RISKS`,
+  `PRCOPILOT_ANALYSIS_MAX_SUGGESTED_TESTS`, `PRCOPILOT_ANALYSIS_MAX_TOUCHED_FILES`)
+- Opt-in provider reachability ping at startup (`PRCOPILOT_AI_HEALTH_CHECK_PING`,
+  warn-only, never fails startup)
+- `X-Request-ID` correlation header echoed back as `requestId` in error responses;
+  structured `validationErrors` map on 400s
+- Explicit deny-by-default CORS configuration; `/api/v1/**` restricted to POST
 - Deterministic adversarial evaluation harness (`GuardrailEvalTest`) measuring
   secret-scan recall, obfuscation bypass, and injection denylist coverage
   against a pinned baseline; emits `target/security-eval.json`
 - Opt-in provider smoke tests (`ProviderSmokeTest`) that run only when
   `AI_PROVIDER_KEY` is set, so credential-less CI never touches a network
-- k6 load/SLO script (`k6/load.js`) with smoke, load, and stress scenarios
-  capturing p50/p95/p99 latency and SSE time-to-first-byte
+
+### Changed
+
+- `prcopilot.auth.mode` and `prcopilot.sarif.consumer` are now enums
+  (`SELFHOST`/`PROD`, `GITHUB`/`SONAR`); invalid values fail startup binding
+- Removed duplicate `prcopilot.ai.ratelimit-*` properties; `resilience4j.ratelimiter`
+  is the single source of truth
+- `PRCOPILOT_CACHE_DIFF_MAX_SIZE=0` now actually disables the response cache
+- Provider API keys no longer default to the `"default-value"` placeholder;
+  missing keys fail fast via `AppStartupCheck`
 
 ### Security
 

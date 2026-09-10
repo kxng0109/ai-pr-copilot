@@ -1,8 +1,10 @@
 package io.github.kxng0109.aiprcopilot.config;
 
+import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
 /**
  * Authentication mode for the service.
@@ -14,21 +16,23 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  */
 @Getter
 @Setter
+@Validated
 @ConfigurationProperties(prefix = "prcopilot.auth")
 public class PrCopilotAuthProperties {
 
-    /**
-     * Auth mode: {@code prod} or {@code selfhost}.
-     */
-    private String mode = "selfhost";
+	/**
+	 * Auth mode: {@code SELFHOST} or {@code PROD} (bound case-insensitively).
+	 */
+	@NotNull(message = "Auth mode must not be null")
+	private AuthMode mode = AuthMode.SELFHOST;
 
-    /**
-     * Pre-shared API key for {@code selfhost} mode. Empty means API endpoints stay locked.
-     */
-    private String apiKey = "";
+	/**
+	 * Pre-shared API key for {@code selfhost} mode. Empty means API endpoints stay locked.
+	 */
+	private String apiKey = "";
 
-    /**
-     * Header carrying the key (default {@code Authorization}, {@code Bearer <key>} accepted).
-     */
-    private String apiKeyHeader = "Authorization";
+	/**
+	 * Header carrying the key (default {@code Authorization}, {@code Bearer <key>} accepted).
+	 */
+	private String apiKeyHeader = "Authorization";
 }

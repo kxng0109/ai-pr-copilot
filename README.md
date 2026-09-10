@@ -250,7 +250,11 @@ AI_TIMEOUT_MILLIS=30000
 
 ```bash
 PRCOPILOT_ANALYSIS_MAX_DIFF_CHARS=50000
+PRCOPILOT_ANALYSIS_MAX_REQUEST_BYTES=262144
 PRCOPILOT_ANALYSIS_MAX_MODEL_OUTPUT_CHARS=1000000
+PRCOPILOT_ANALYSIS_MAX_RISKS=200
+PRCOPILOT_ANALYSIS_MAX_SUGGESTED_TESTS=100
+PRCOPILOT_ANALYSIS_MAX_TOUCHED_FILES=500
 PRCOPILOT_ANALYSIS_DEFAULT_LANGUAGE=en
 PRCOPILOT_ANALYSIS_DEFAULT_STYLE=conventional-commits
 PRCOPILOT_ANALYSIS_INCLUDE_RAW_MODEL_OUTPUT=false
@@ -258,6 +262,11 @@ PRCOPILOT_CACHE_DIFF_MAX_SIZE=1000
 PRCOPILOT_CACHE_DIFF_TTL=30m
 PRCOPILOT_GATE_MIN_LEVEL=note
 ```
+
+`PRCOPILOT_ANALYSIS_MAX_REQUEST_BYTES` is a hard byte ceiling on `/api/v1/**`
+JSON bodies enforced before deserialization (413). `PRCOPILOT_CACHE_DIFF_MAX_SIZE=0`
+disables the response cache. Rate limiting is configured only via the
+`resilience4j.ratelimiter` properties (`PRCOPILOT_RATELIMITER_*` env vars).
 
 ### Responsiveness / Resources (all optional)
 
@@ -337,13 +346,18 @@ OLLAMA_MODEL=qwen3:4b
 
 Structured errors via `GlobalExceptionHandler`:
 
-- 400 for validation errors or unreadable body
+- 400 for validation errors (field details in `validationErrors`) or unreadable body
 - 404 for unknown endpoint
 - 405 for unsupported method
-- 413 for oversized diff
+- 413 for oversized request body or diff
 - 422 for invalid model output
+- 429 for rate limit or provider concurrency exceeded
 - 500 for unexpected errors
 - 502 or 504 for upstream access or timeout
+
+Pass `X-Request-ID` (1-64 chars of letters, digits, `-`, `_`) to correlate
+errors; the value is echoed back as `requestId`. The `requestId` body field
+accepts the same shape.
 
 Example:
 
@@ -352,9 +366,12 @@ Example:
 	"timestamp": "...",
 	"statusCode": 400,
 	"error": "Bad Request",
-	"message": "{diff=Diff must not be blank}",
+	"message": "Validation failed",
 	"path": "/api/v1/analyze-diff",
-	"requestId": null
+	"requestId": null,
+	"validationErrors": {
+		"diff": "Diff must not be blank"
+	}
 }
 ```
 
@@ -451,11 +468,6 @@ not regress below a pinned baseline. A JSON report is written to
 of prompt injection is impossible, so the harness reports bypass rate rather
 than claiming zero bypasses. Current measurements: secret-scan 6/7,
 obfuscation 0/3, injection 3/5.
-
-**Load/SLO** (`k6/load.js`) — smoke, load and stress scenarios capturing
-`http_req_duration` p50/p95/p99 and `http_req_waiting` as SSE
-time-to-first-token. The SLO numbers are a proposed starting point, not a
-measurement; see `k6/README.md` before trusting them.
 
 ## License
 

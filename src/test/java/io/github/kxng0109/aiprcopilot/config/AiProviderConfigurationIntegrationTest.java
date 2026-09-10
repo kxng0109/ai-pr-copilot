@@ -9,45 +9,61 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
 @TestPropertySource(
-        properties = {
-                "prcopilot.ai.provider=openai",
-                "prcopilot.ai.auto-fallback=false",
-                "spring.ai.openai.api-key=test-key"
-        }
+		properties = {
+				"prcopilot.ai.provider=openai",
+				"prcopilot.ai.auto-fallback=false",
+				"spring.ai.openai.api-key=test-key"
+		}
 )
 public class AiProviderConfigurationIntegrationTest {
 
-    @Autowired
-    private MultiAiConfigurationProperties multiAiConfig;
+	@Autowired
+	private MultiAiConfigurationProperties multiAiConfig;
 
-    @Autowired
-    private PrCopilotAnalysisProperties analysisProperties;
+	@Autowired
+	private PrCopilotAnalysisProperties analysisProperties;
 
-    @Test
-    void contextLoads() {
-        assertNotNull(multiAiConfig);
-        assertNotNull(analysisProperties);
-    }
+	@Autowired
+	private PrCopilotAuthProperties authProperties;
 
-    @Test
-    void shouldLoadPrimaryProviderConfiguration() {
-        assertEquals(AiProvider.OPENAI, multiAiConfig.getProvider());
-        assertFalse(multiAiConfig.isAutoFallback());
-        assertNull(multiAiConfig.getFallbackProvider());
-    }
+	@Autowired
+	private PrCopilotSarifProperties sarifProperties;
 
-    @Test
-    void shouldLoadAnalysisPropertiesWithDefaults() {
-        assertEquals(50000, analysisProperties.getMaxDiffChars());
-        assertEquals("en", analysisProperties.getDefaultLanguage());
-        assertEquals("conventional-commits", analysisProperties.getDefaultStyle());
-        assertFalse(analysisProperties.isIncludeRawModelOutput());
-    }
+	@Test
+	void contextLoads() {
+		assertNotNull(multiAiConfig);
+		assertNotNull(analysisProperties);
+	}
 
-    @Test
-    void shouldLoadAiGenerationProperties() {
-        assertEquals(0.1, multiAiConfig.getTemperature(), 0.001);
-        assertEquals(1024, multiAiConfig.getMaxTokens());
-        assertEquals(30000L, multiAiConfig.getTimeoutMillis());
-    }
+	@Test
+	void shouldLoadPrimaryProviderConfiguration() {
+		assertEquals(AiProvider.OPENAI, multiAiConfig.getProvider());
+		assertFalse(multiAiConfig.isAutoFallback());
+		assertNull(multiAiConfig.getFallbackProvider());
+	}
+
+	@Test
+	void shouldLoadAnalysisPropertiesWithDefaults() {
+		assertEquals(50000, analysisProperties.getMaxDiffChars());
+		assertEquals("en", analysisProperties.getDefaultLanguage());
+		assertEquals("conventional-commits", analysisProperties.getDefaultStyle());
+		assertFalse(analysisProperties.isIncludeRawModelOutput());
+	}
+
+	@Test
+	void shouldLoadAiGenerationProperties() {
+		assertEquals(0.1, multiAiConfig.getTemperature(), 0.001);
+		assertEquals(1024, multiAiConfig.getMaxTokens());
+		assertEquals(30000L, multiAiConfig.getTimeoutMillis());
+	}
+
+	@Test
+	void shouldBindAuthModeEnumCaseInsensitively() {
+		assertEquals(AuthMode.SELFHOST, authProperties.getMode());
+	}
+
+	@Test
+	void shouldBindSarifConsumerDefault() {
+		assertEquals(SarifConsumer.GITHUB, sarifProperties.getConsumer());
+	}
 }

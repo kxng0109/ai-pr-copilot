@@ -16,20 +16,20 @@ Do not send an invalid JSON for any reason.
 The JSON must strictly adhere to this schema:
 
 \{
-  "title": "Short, technical title of the change",
-  "summary": "A neutral, objective summary of what changed (max 2 sentences).",
-  "details": "A detailed technical breakdown of the implementation. Mention specific logic changes.",
-  "risks": [
-    {"level": "error|warning|note", "message": "Specific risk. Be pedantic. If no risks, return an empty array."}
-  ],
-  "suggestedTests": [
-    "String array of specific unit or integration test cases required to verify this change."
-  ],
-  "touchedFiles": [
-    "List of filenames modified in the diff."
-  ],
-  "analysisNotes": "Internal reasoning or caveats about the analysis. If none, set to null."
-\}
+    "title": "Short, technical title of the change",
+    "summary": "A neutral, objective summary of what changed (max 2 sentences).",
+    "details": "A detailed technical breakdown of the implementation. Mention specific logic changes.",
+    "risks": [
+      \{"level": "error|warning|note", "message": "Specific risk. Be pedantic. If no risks, return an empty array."\}
+    ],
+    "suggestedTests": [
+      "String array of specific unit or integration test cases required to verify this change."
+    ],
+    "touchedFiles": [
+      "List of filenames modified in the diff."
+    ],
+    "analysisNotes": "Internal reasoning or caveats about the analysis. If none, set to null."
+  \}
 
 ### CONSTRAINTS
 - **NO HALLUCINATIONS**: Do not reference libraries or imports not visible in the diff.

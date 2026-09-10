@@ -8,12 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 @SpringBootTest
 public class PrCopilotLoggingPropertiesTest {
-    @Autowired
-    private PrCopilotLoggingProperties prcopilotLoggingProperties;
+	@Autowired
+	private PrCopilotLoggingProperties prcopilotLoggingProperties;
 
-    @Test
-    void shouldDefaultLoggingFlagsToFalse(){
-        assertFalse(prcopilotLoggingProperties.isLogPrompts());
-        assertFalse(prcopilotLoggingProperties.isLogResponses());
-    }
+	@Test
+	void shouldDefaultLoggingFlagsToFalse() {
+		assertFalse(prcopilotLoggingProperties.isLogPrompts());
+		assertFalse(prcopilotLoggingProperties.isLogResponses());
+	}
 }

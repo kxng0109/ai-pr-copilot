@@ -11,27 +11,27 @@ import lombok.RequiredArgsConstructor;
 @Getter
 @RequiredArgsConstructor
 public enum AiProvider {
-    OPENAI("openai"),
-    ANTHROPIC("anthropic"),
-    GEMINI("gemini"),
-    OLLAMA("ollama");
+	OPENAI("openai"),
+	ANTHROPIC("anthropic"),
+	GEMINI("gemini"),
+	OLLAMA("ollama");
 
-    private final String value;
+	private final String value;
 
-    /**
-     * Returns the {@code AiProvider} corresponding to the given string value.
-     *
-     * @param value the string representation of the provider; must not be {@code null} or empty
-     * @return the matching {@code AiProvider}, never {@code null}
-     * @throws IllegalArgumentException if no matching {@code AiProvider} is found
-     */
-    public static AiProvider fromValue(String value) {
-        for (AiProvider a : AiProvider.values()) {
-            if (a.value.equalsIgnoreCase(value)) {
-                return a;
-            }
-        }
+	/**
+	 * Returns the {@code AiProvider} corresponding to the given string value.
+	 *
+	 * @param value the string representation of the provider; must not be {@code null} or empty
+	 * @return the matching {@code AiProvider}, never {@code null}
+	 * @throws IllegalArgumentException if no matching {@code AiProvider} is found
+	 */
+	public static AiProvider fromValue(String value) {
+		for (AiProvider a : AiProvider.values()) {
+			if (a.value.equalsIgnoreCase(value)) {
+				return a;
+			}
+		}
 
-        throw new IllegalArgumentException(String.format("Unknown AI provider: %s.", value));
-    }
+		throw new IllegalArgumentException(String.format("Unknown AI provider: %s.", value));
+	}
 }

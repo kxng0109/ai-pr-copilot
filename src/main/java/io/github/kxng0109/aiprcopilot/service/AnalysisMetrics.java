@@ -12,22 +12,24 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class AnalysisMetrics {
 
-    private final MeterRegistry meterRegistry;
+	private final MeterRegistry meterRegistry;
 
-    public void countCacheHit(String provider) {
-        meterRegistry.counter("aiprcopilot.analysis.cache", "result", "hit", "provider", provider).increment();
-    }
+	public void countCacheHit(String provider) {
+		meterRegistry.counter("aiprcopilot.analysis.cache", "result", "hit", "provider", provider).increment();
+	}
 
-    public void countCacheMiss(String provider) {
-        meterRegistry.counter("aiprcopilot.analysis.cache", "result", "miss", "provider", provider).increment();
-    }
+	public void countCacheMiss(String provider) {
+		meterRegistry.counter("aiprcopilot.analysis.cache", "result", "miss", "provider", provider).increment();
+	}
 
-    public Timer.Sample startSample() {
-        return Timer.start(meterRegistry);
-    }
+	public Timer.Sample startSample() {
+		return Timer.start(meterRegistry);
+	}
 
-    public void stopSample(Timer.Sample sample, String provider, String outcome) {
-        sample.stop(meterRegistry.timer("aiprcopilot.analysis.duration",
-                                        "provider", provider, "outcome", outcome));
-    }
+	public void stopSample(Timer.Sample sample, String provider, String outcome) {
+		sample.stop(meterRegistry.timer(
+				"aiprcopilot.analysis.duration",
+				"provider", provider, "outcome", outcome
+		));
+	}
 }

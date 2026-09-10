@@ -14,159 +14,183 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 public class AppStartupCheckTest {
 
-    @Mock
-    private MultiAiConfigurationProperties multiAiConfig;
+	@Mock
+	private MultiAiConfigurationProperties multiAiConfig;
 
-    private AppStartupCheck appStartupCheck;
+	private AppStartupCheck appStartupCheck;
 
-    @BeforeEach
-    void setup() {
-        appStartupCheck = new AppStartupCheck(multiAiConfig);
-    }
+	@BeforeEach
+	void setup() {
+		appStartupCheck = new AppStartupCheck(multiAiConfig);
+	}
 
-    @Test
-    void validateConfiguration_shouldPass_whenOpenAiConfiguredCorrectly() {
-        when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
-        when(multiAiConfig.isAutoFallback()).thenReturn(false);
+	@Test
+	void validateConfiguration_shouldPass_whenOpenAiConfiguredCorrectly() {
+		when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
+		when(multiAiConfig.isAutoFallback()).thenReturn(false);
 
-        ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "sk-valid-key");
+		ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "sk-valid-key");
 
-        assertDoesNotThrow(() -> appStartupCheck.validateConfiguration());
-    }
+		assertDoesNotThrow(() -> appStartupCheck.validateConfiguration());
+	}
 
-    @Test
-    void validateConfiguration_shouldFail_whenOpenAiKeyIsMissing() {
-        when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
+	@Test
+	void validateConfiguration_shouldFail_whenOpenAiKeyIsMissing() {
+		when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
 
-        ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "");
+		ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "");
 
-        CustomApiException exception = assertThrows(
-                CustomApiException.class,
-                () -> appStartupCheck.validateConfiguration()
-        );
+		CustomApiException exception = assertThrows(
+				CustomApiException.class,
+				() -> appStartupCheck.validateConfiguration()
+		);
 
-        assertTrue(exception.getMessage().contains("OPENAI"));
-        assertTrue(exception.getMessage().contains("not configured"));
-    }
+		assertTrue(exception.getMessage().contains("OPENAI"));
+		assertTrue(exception.getMessage().contains("not configured"));
+	}
 
-    @Test
-    void validateConfiguration_shouldFail_whenOpenAiKeyIsDefault() {
-        when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
+	@Test
+	void validateConfiguration_shouldFail_whenOpenAiKeyIsDefault() {
+		when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
 
-        ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "default-value");
+		ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "default-value");
 
-        CustomApiException exception = assertThrows(
-                CustomApiException.class,
-                () -> appStartupCheck.validateConfiguration()
-        );
+		CustomApiException exception = assertThrows(
+				CustomApiException.class,
+				() -> appStartupCheck.validateConfiguration()
+		);
 
-        assertTrue(exception.getMessage().contains("OPENAI"));
-    }
+		assertTrue(exception.getMessage().contains("OPENAI"));
+	}
 
-    @Test
-    void validateConfiguration_shouldPass_whenAnthropicConfiguredCorrectly() {
-        when(multiAiConfig.getProvider()).thenReturn(AiProvider.ANTHROPIC);
-        when(multiAiConfig.isAutoFallback()).thenReturn(false);
+	@Test
+	void validateConfiguration_shouldPass_whenAnthropicConfiguredCorrectly() {
+		when(multiAiConfig.getProvider()).thenReturn(AiProvider.ANTHROPIC);
+		when(multiAiConfig.isAutoFallback()).thenReturn(false);
 
-        ReflectionTestUtils.setField(appStartupCheck, "anthropicApiKey", "sk-ant-valid-key");
+		ReflectionTestUtils.setField(appStartupCheck, "anthropicApiKey", "sk-ant-valid-key");
 
-        assertDoesNotThrow(() -> appStartupCheck.validateConfiguration());
-    }
+		assertDoesNotThrow(() -> appStartupCheck.validateConfiguration());
+	}
 
-    @Test
-    void validateConfiguration_shouldFail_whenAnthropicKeyIsMissing() {
-        when(multiAiConfig.getProvider()).thenReturn(AiProvider.ANTHROPIC);
+	@Test
+	void validateConfiguration_shouldFail_whenAnthropicKeyIsMissing() {
+		when(multiAiConfig.getProvider()).thenReturn(AiProvider.ANTHROPIC);
 
-        ReflectionTestUtils.setField(appStartupCheck, "anthropicApiKey", null);
+		ReflectionTestUtils.setField(appStartupCheck, "anthropicApiKey", null);
 
-        CustomApiException exception = assertThrows(
-                CustomApiException.class,
-                () -> appStartupCheck.validateConfiguration()
-        );
+		CustomApiException exception = assertThrows(
+				CustomApiException.class,
+				() -> appStartupCheck.validateConfiguration()
+		);
 
-        assertTrue(exception.getMessage().contains("ANTHROPIC"));
-    }
+		assertTrue(exception.getMessage().contains("ANTHROPIC"));
+	}
 
-    @Test
-    void validateConfiguration_shouldPass_whenGeminiConfiguredCorrectly() {
-        when(multiAiConfig.getProvider()).thenReturn(AiProvider.GEMINI);
-        when(multiAiConfig.isAutoFallback()).thenReturn(false);
+	@Test
+	void validateConfiguration_shouldPass_whenGeminiConfiguredCorrectly() {
+		when(multiAiConfig.getProvider()).thenReturn(AiProvider.GEMINI);
+		when(multiAiConfig.isAutoFallback()).thenReturn(false);
 
-        ReflectionTestUtils.setField(appStartupCheck, "googleGenAiProjectId", "my-gcp-project");
-        ReflectionTestUtils.setField(appStartupCheck, "googleGenAiLocation", "us-central1");
+		ReflectionTestUtils.setField(appStartupCheck, "googleGenAiProjectId", "my-gcp-project");
+		ReflectionTestUtils.setField(appStartupCheck, "googleGenAiLocation", "us-central1");
 
-        assertDoesNotThrow(() -> appStartupCheck.validateConfiguration());
-    }
+		assertDoesNotThrow(() -> appStartupCheck.validateConfiguration());
+	}
 
-    @Test
-    void validateConfiguration_shouldFail_whenGeminiProjectIdMissing() {
-        when(multiAiConfig.getProvider()).thenReturn(AiProvider.GEMINI);
+	@Test
+	void validateConfiguration_shouldFail_whenGeminiProjectIdMissing() {
+		when(multiAiConfig.getProvider()).thenReturn(AiProvider.GEMINI);
 
-        ReflectionTestUtils.setField(appStartupCheck, "googleGenAiProjectId", "");
-        ReflectionTestUtils.setField(appStartupCheck, "googleGenAiLocation", "");
-        ReflectionTestUtils.setField(appStartupCheck, "googleGenAiApiKey", "");
+		ReflectionTestUtils.setField(appStartupCheck, "googleGenAiProjectId", "");
+		ReflectionTestUtils.setField(appStartupCheck, "googleGenAiLocation", "");
+		ReflectionTestUtils.setField(appStartupCheck, "googleGenAiApiKey", "");
 
-        CustomApiException exception = assertThrows(
-                CustomApiException.class,
-                () -> appStartupCheck.validateConfiguration()
-        );
+		CustomApiException exception = assertThrows(
+				CustomApiException.class,
+				() -> appStartupCheck.validateConfiguration()
+		);
 
-        assertTrue(exception.getMessage().contains("Gemini"));
-        assertTrue(exception.getMessage().contains("GOOGLE_GENAI_PROJECT_ID"));
-    }
+		assertTrue(exception.getMessage().contains("Gemini"));
+		assertTrue(exception.getMessage().contains("GOOGLE_GENAI_PROJECT_ID"));
+	}
 
-    @Test
-    void validateConfiguration_shouldPass_whenFallbackConfiguredCorrectly() {
-        when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
-        when(multiAiConfig.isAutoFallback()).thenReturn(true);
-        when(multiAiConfig.getFallbackProvider()).thenReturn(AiProvider.ANTHROPIC);
+	@Test
+	void validateConfiguration_shouldPass_whenFallbackConfiguredCorrectly() {
+		when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
+		when(multiAiConfig.isAutoFallback()).thenReturn(true);
+		when(multiAiConfig.getFallbackProvider()).thenReturn(AiProvider.ANTHROPIC);
 
-        ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "sk-valid");
-        ReflectionTestUtils.setField(appStartupCheck, "anthropicApiKey", "sk-ant-valid");
+		ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "sk-valid");
+		ReflectionTestUtils.setField(appStartupCheck, "anthropicApiKey", "sk-ant-valid");
 
-        assertDoesNotThrow(() -> appStartupCheck.validateConfiguration());
-    }
+		assertDoesNotThrow(() -> appStartupCheck.validateConfiguration());
+	}
 
-    @Test
-    void validateConfiguration_shouldFail_whenFallbackEnabledButNotConfigured() {
-        when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
-        when(multiAiConfig.isAutoFallback()).thenReturn(true);
-        when(multiAiConfig.getFallbackProvider()).thenReturn(null);
+	@Test
+	void validateConfiguration_shouldFail_whenFallbackEnabledButNotConfigured() {
+		when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
+		when(multiAiConfig.isAutoFallback()).thenReturn(true);
+		when(multiAiConfig.getFallbackProvider()).thenReturn(null);
 
-        ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "sk-valid");
+		ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "sk-valid");
 
-        RuntimeException exception = assertThrows(
-                RuntimeException.class,
-                () -> appStartupCheck.validateConfiguration()
-        );
+		RuntimeException exception = assertThrows(
+				RuntimeException.class,
+				() -> appStartupCheck.validateConfiguration()
+		);
 
-        assertTrue(exception.getMessage().contains("Auto-fallback is enabled"));
-        assertTrue(exception.getMessage().contains("no fallback provider is configured"));
-    }
+		assertTrue(exception.getMessage().contains("Auto-fallback is enabled"));
+		assertTrue(exception.getMessage().contains("no fallback provider is configured"));
+	}
 
-    @Test
-    void validateConfiguration_shouldFail_whenFallbackProviderKeyMissing() {
-        when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
-        when(multiAiConfig.isAutoFallback()).thenReturn(true);
-        when(multiAiConfig.getFallbackProvider()).thenReturn(AiProvider.ANTHROPIC);
+	@Test
+	void validateConfiguration_shouldFail_whenFallbackProviderKeyMissing() {
+		when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
+		when(multiAiConfig.isAutoFallback()).thenReturn(true);
+		when(multiAiConfig.getFallbackProvider()).thenReturn(AiProvider.ANTHROPIC);
 
-        ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "sk-valid");
-        ReflectionTestUtils.setField(appStartupCheck, "anthropicApiKey", "");
+		ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "sk-valid");
+		ReflectionTestUtils.setField(appStartupCheck, "anthropicApiKey", "");
 
-        CustomApiException exception = assertThrows(
-                CustomApiException.class,
-                () -> appStartupCheck.validateConfiguration()
-        );
+		CustomApiException exception = assertThrows(
+				CustomApiException.class,
+				() -> appStartupCheck.validateConfiguration()
+		);
 
-        assertTrue(exception.getMessage().contains("ANTHROPIC"));
-    }
+		assertTrue(exception.getMessage().contains("ANTHROPIC"));
+	}
 
-    @Test
-    void validateConfiguration_shouldPass_whenOllamaSelected() {
-        when(multiAiConfig.getProvider()).thenReturn(AiProvider.OLLAMA);
-        ReflectionTestUtils.setField(appStartupCheck, "ollamaBaseUrl", "http://localhost:11434");
-        ReflectionTestUtils.setField(appStartupCheck, "ollamaChatModel", "qwen3:4b");
+	@Test
+	void validateConfiguration_shouldPass_whenOllamaSelected() {
+		when(multiAiConfig.getProvider()).thenReturn(AiProvider.OLLAMA);
+		ReflectionTestUtils.setField(appStartupCheck, "ollamaBaseUrl", "http://localhost:11434");
+		ReflectionTestUtils.setField(appStartupCheck, "ollamaChatModel", "qwen3:4b");
 
-        assertDoesNotThrow(() -> appStartupCheck.validateConfiguration());
-    }
+		assertDoesNotThrow(() -> appStartupCheck.validateConfiguration());
+	}
+
+	@Test
+	void validateConfiguration_shouldWarnButNotFail_whenPingEnabledAndUnreachable() {
+		when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
+		when(multiAiConfig.isAutoFallback()).thenReturn(false);
+		when(multiAiConfig.isHealthCheckPing()).thenReturn(true);
+
+		ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "sk-valid-key");
+		ReflectionTestUtils.setField(appStartupCheck, "openAiBaseUrl", "http://127.0.0.1:9");
+
+		assertDoesNotThrow(() -> appStartupCheck.validateConfiguration());
+	}
+
+	@Test
+	void validateConfiguration_shouldSkipPing_whenPingEnabledButNoBaseUrl() {
+		when(multiAiConfig.getProvider()).thenReturn(AiProvider.OPENAI);
+		when(multiAiConfig.isAutoFallback()).thenReturn(false);
+		when(multiAiConfig.isHealthCheckPing()).thenReturn(true);
+
+		ReflectionTestUtils.setField(appStartupCheck, "openAiApiKey", "sk-valid-key");
+		ReflectionTestUtils.setField(appStartupCheck, "openAiBaseUrl", "");
+
+		assertDoesNotThrow(() -> appStartupCheck.validateConfiguration());
+	}
 }

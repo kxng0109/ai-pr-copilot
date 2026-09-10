@@ -34,421 +34,424 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 public class DiffAnalysisServiceTest {
 
-    @Mock
-    private PrCopilotAnalysisProperties analysisProperties;
-
-    @Mock
-    private MultiAiConfigurationProperties multiAiConfigurationProperties;
-
-    @Mock
-    private PrCopilotLoggingProperties loggingProperties;
-
-    @Mock
-    private ChatClient primaryChatClient;
-
-    @Mock
-    private ChatOptions.Builder primaryChatOptions;
-
-    @Mock
-    private PromptBuilderService promptBuilderService;
-
-    @Mock
-    private AiChatService aiChatService;
-
-    @Mock
-    private DiffResponseMapperService diffResponseMapperService;
-
-    @Mock
-    private io.github.resilience4j.bulkhead.BulkheadRegistry bulkheadRegistry;
-
-    @Mock
-    private io.github.resilience4j.bulkhead.Bulkhead bulkhead;
-
-    @Mock
-    private com.github.benmanes.caffeine.cache.Cache<String, AnalyzeDiffResponse> analysisCache;
-
-    @Mock
-    private AnalysisMetrics analysisMetrics;
-
-    @InjectMocks
-    private DiffAnalysisService diffAnalysisService;
-
-    @BeforeEach
-    @SuppressWarnings("unchecked")
-    public void setup() {
-        lenient().when(analysisProperties.getDefaultLanguage()).thenReturn("en");
-        lenient().when(analysisProperties.getMaxDiffChars()).thenReturn(50000);
-        lenient().when(analysisProperties.isIncludeRawModelOutput()).thenReturn(false);
-        lenient().when(analysisProperties.getDefaultStyle()).thenReturn("conventional-commits");
-
-        lenient().when(multiAiConfigurationProperties.getProvider()).thenReturn(AiProvider.OPENAI);
-        lenient().when(multiAiConfigurationProperties.isAutoFallback()).thenReturn(false);
-        lenient().when(multiAiConfigurationProperties.getTemperature()).thenReturn(0.1);
-        lenient().when(multiAiConfigurationProperties.getMaxTokens()).thenReturn(1024);
-        lenient().when(promptBuilderService.templateHash()).thenReturn("testhash");
-        lenient().when(bulkheadRegistry.bulkhead(anyString())).thenReturn(bulkhead);
-        lenient().doAnswer(i -> ((java.util.function.Supplier<?>) i.getArgument(0)).get())
-                .when(bulkhead).executeSupplier(any());
-
-        diffAnalysisService = new DiffAnalysisService(
-                analysisProperties,
-                primaryChatClient,
-                primaryChatOptions,
-                loggingProperties,
-                multiAiConfigurationProperties,
-                promptBuilderService,
-                aiChatService,
-                diffResponseMapperService,
-                bulkheadRegistry,
-                analysisCache,
-                analysisMetrics,
-                null,
-                null
-        );
-    }
-
-    @Test
-    public void analyzeDiff_shouldUseDefaults_whenLanguageAndStyleAreNull() {
-        String diff = "a diff sha";
-        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
-                                                       .diff(diff)
-                                                       .requestId("req-1")
-                                                       .build();
-
-        Prompt mockPrompt = mock(Prompt.class);
-        when(promptBuilderService.buildDiffAnalysisPrompt(
-                eq("en"),
-                eq("conventional-commits"),
-                eq(diff),
-                isNull(),
-                eq("req-1")
-        )).thenReturn(mockPrompt);
-
-        ChatResponse mockChatResponse = mockChatResponse();
-        when(aiChatService.callAiModel(
-                mockPrompt,
-                primaryChatClient,
-                primaryChatOptions
-        )).thenReturn(mockChatResponse);
-
-        AnalyzeDiffResponse expectedResponse = AnalyzeDiffResponse.builder()
-                                                                  .title("test title")
-                                                                  .summary("test summary")
-                                                                  .requestId("req-1")
-                                                                  .build();
-
-        when(diffResponseMapperService.mapToAnalyzeDiffResponse(
-                eq(mockChatResponse),
-                anyLong(),
-                eq(diff),
-                eq("req-1"),
-                eq("openai")
-        )).thenReturn(expectedResponse);
-
-        AnalyzeDiffResponse response = diffAnalysisService.analyzeDiff(request);
-
-        assertNotNull(response);
-        assertEquals(expectedResponse.title(), response.title());
-        assertEquals(expectedResponse.summary(), response.summary());
-        assertEquals(expectedResponse.requestId(), response.requestId());
-
-        verify(promptBuilderService).buildDiffAnalysisPrompt(
-                "en",
-                "conventional-commits",
-                diff,
-                null,
-                "req-1"
-        );
-        verify(aiChatService).callAiModel(mockPrompt, primaryChatClient, primaryChatOptions);
-        verify(diffResponseMapperService).mapToAnalyzeDiffResponse(
-                eq(mockChatResponse),
-                anyLong(),
-                eq(diff),
-                eq("req-1"),
-                eq("openai")
-        );
-    }
-
-    @Test
-    void analyzeDiff_shouldUseProvidedLanguageAndStyle_whenSpecified() {
-        String diff = "diff content";
-        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
-                                                       .diff(diff)
-                                                       .language("fr")
-                                                       .style("gitlab")
-                                                       .maxSummaryLength(200)
-                                                       .requestId("req-2")
-                                                       .build();
-
-        Prompt mockPrompt = mock(Prompt.class);
-        when(promptBuilderService.buildDiffAnalysisPrompt(
-                eq("fr"),
-                eq("gitlab"),
-                eq(diff),
-                eq(200),
-                eq("req-2")
-        )).thenReturn(mockPrompt);
-
-        ChatResponse mockChatResponse = mockChatResponse();
-        when(aiChatService.callAiModel(mockPrompt, primaryChatClient, primaryChatOptions))
-                .thenReturn(mockChatResponse);
-
-        AnalyzeDiffResponse expectedResponse = AnalyzeDiffResponse.builder()
-                                                                  .title("titre de test")
-                                                                  .build();
-
-        when(diffResponseMapperService.mapToAnalyzeDiffResponse(
-                any(), anyLong(), any(), any(), any()
-        )).thenReturn(expectedResponse);
-
-        AnalyzeDiffResponse response = diffAnalysisService.analyzeDiff(request);
-
-        assertNotNull(response);
-        verify(promptBuilderService).buildDiffAnalysisPrompt("fr", "gitlab", diff, 200, "req-2");
-    }
-
-
-    @Test
-    public void analyzeDiff_shouldThrowDoffTooLargeException_whenDiffExceedsMaxChars() {
-        String largeDiff = "x".repeat(analysisProperties.getMaxDiffChars() + 1);
-        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
-                                                       .diff(largeDiff)
-                                                       .requestId("req-1")
-                                                       .build();
-
-        assertThrows(DiffTooLargeException.class, () -> diffAnalysisService.analyzeDiff(request));
-
-        verify(promptBuilderService, never()).buildDiffAnalysisPrompt(any(), any(), any(), any(), any());
-        verify(aiChatService, never()).callAiModel(any(), any(), any());
-        verify(diffResponseMapperService, never()).mapToAnalyzeDiffResponse(any(), anyLong(), any(), any(), any());
-    }
-
-    @Test
-    void analyzeDiff_shouldRethrowModelOutputParseException_whenParsingFails() {
-        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
-                                                       .diff("diff")
-                                                       .requestId("req-1")
-                                                       .build();
-
-        Prompt mockPrompt = mock(Prompt.class);
-        when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
-                .thenReturn(mockPrompt);
-
-        when(aiChatService.callAiModel(any(), any(), any()))
-                .thenReturn(mockChatResponse());
-
-        when(diffResponseMapperService.mapToAnalyzeDiffResponse(any(), anyLong(), any(), any(), any()))
-                .thenThrow(new ModelOutputParseException("Invalid JSON"));
-
-        ModelOutputParseException exception = assertThrows(
-                ModelOutputParseException.class,
-                () -> diffAnalysisService.analyzeDiff(request)
-        );
-
-        assertEquals("Invalid JSON", exception.getMessage());
-    }
-
-    @Test
-    void analyzeDiff_shouldUseFallback_whenPrimaryFailsAndAutoFallbackEnabled() {
-        when(multiAiConfigurationProperties.isAutoFallback()).thenReturn(true);
-        when(multiAiConfigurationProperties.getFallbackProvider()).thenReturn(AiProvider.ANTHROPIC);
-
-        ChatClient fallbackChatClient = mock(ChatClient.class);
-        ChatOptions.Builder fallbackChatOptions = mock(ChatOptions.Builder.class);
-
-        diffAnalysisService = new DiffAnalysisService(
-                analysisProperties,
-                primaryChatClient,
-                primaryChatOptions,
-                loggingProperties,
-                multiAiConfigurationProperties,
-                promptBuilderService,
-                aiChatService,
-                diffResponseMapperService,
-                bulkheadRegistry,
-                analysisCache,
-                analysisMetrics,
-                fallbackChatClient,
-                fallbackChatOptions
-        );
-
-        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
-                                                       .diff("diff")
-                                                       .requestId("req-1")
-                                                       .build();
-
-        Prompt mockPrompt = mock(Prompt.class);
-        when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
-                .thenReturn(mockPrompt);
-
-        when(aiChatService.callAiModel(mockPrompt, primaryChatClient, primaryChatOptions))
-                .thenThrow(new RuntimeException("Primary failed"));
-
-        ChatResponse fallbackResponse = mockChatResponse();
-        when(aiChatService.callAiModel(mockPrompt, fallbackChatClient, fallbackChatOptions))
-                .thenReturn(fallbackResponse);
-
-        AnalyzeDiffResponse expectedResponse = AnalyzeDiffResponse.builder()
-                                                                  .title("fallback response")
-                                                                  .build();
-
-        when(diffResponseMapperService.mapToAnalyzeDiffResponse(
-                eq(fallbackResponse), anyLong(), any(), any(), eq("anthropic")
-        )).thenReturn(expectedResponse);
-
-        AnalyzeDiffResponse response = diffAnalysisService.analyzeDiff(request);
-
-        assertNotNull(response);
-        assertEquals("fallback response", response.title());
-
-        verify(aiChatService).callAiModel(mockPrompt, primaryChatClient, primaryChatOptions);
-        verify(aiChatService).callAiModel(mockPrompt, fallbackChatClient, fallbackChatOptions);
-    }
-
-    @Test
-    void analyzeDiff_shouldThrowException_whenBothPrimaryAndFallbackFail() {
-        when(multiAiConfigurationProperties.isAutoFallback()).thenReturn(true);
-        when(multiAiConfigurationProperties.getFallbackProvider()).thenReturn(AiProvider.ANTHROPIC);
-
-        ChatClient fallbackChatClient = mock(ChatClient.class);
-        ChatOptions.Builder fallbackChatOptions = mock(ChatOptions.Builder.class);
-
-        diffAnalysisService = new DiffAnalysisService(
-                analysisProperties,
-                primaryChatClient,
-                primaryChatOptions,
-                loggingProperties,
-                multiAiConfigurationProperties,
-                promptBuilderService,
-                aiChatService,
-                diffResponseMapperService,
-                bulkheadRegistry,
-                analysisCache,
-                analysisMetrics,
-                fallbackChatClient,
-                fallbackChatOptions
-        );
-
-        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
-                                                       .diff("diff")
-                                                       .requestId("req-1")
-                                                       .build();
-
-        Prompt mockPrompt = mock(Prompt.class);
-        when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
-                .thenReturn(mockPrompt);
-
-        when(aiChatService.callAiModel(mockPrompt, primaryChatClient, primaryChatOptions))
-                .thenThrow(new RuntimeException("Primary failed"));
-
-        when(aiChatService.callAiModel(mockPrompt, fallbackChatClient, fallbackChatOptions))
-                .thenThrow(new RuntimeException("Fallback also failed"));
-
-        RuntimeException exception = assertThrows(
-                RuntimeException.class,
-                () -> diffAnalysisService.analyzeDiff(request)
-        );
-
-        assertThat(exception.getMessage()).contains("Primary failed");
-        assertThat(exception.getMessage()).contains("Fallback also failed");
-    }
-
-    @Test
-    void analyzeDiff_shouldLogPrompt_whenLoggingEnabled() {
-        when(loggingProperties.isLogPrompts()).thenReturn(true);
-
-        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
-                                                       .diff("diff")
-                                                       .requestId("req-1")
-                                                       .build();
-
-        Prompt mockPrompt = mock(Prompt.class);
-        when(mockPrompt.toString()).thenReturn("Mock Prompt Content");
-        when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
-                .thenReturn(mockPrompt);
-
-        when(aiChatService.callAiModel(any(), any(), any()))
-                .thenReturn(mockChatResponse());
-
-        when(diffResponseMapperService.mapToAnalyzeDiffResponse(any(), anyLong(), any(), any(), any()))
-                .thenReturn(AnalyzeDiffResponse.builder().title("test").build());
-
-        diffAnalysisService.analyzeDiff(request);
-
-        verify(loggingProperties).isLogPrompts();
-    }
-
-    @Test
-    void analyzeDiff_shouldReturnCachedResponse_whenDiffHashSeenBefore() {
-        when(analysisProperties.getCacheMaxSize()).thenReturn(1000);
-        AnalyzeDiffResponse cached = AnalyzeDiffResponse.builder()
-                                                        .title("cached title")
-                                                        .requestId("old-req")
-                                                        .build();
-        when(analysisCache.getIfPresent(anyString())).thenReturn(cached);
-
-        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
-                                                        .diff("diff")
-                                                        .requestId("req-1")
-                                                        .build();
-
-        AnalyzeDiffResponse response = diffAnalysisService.analyzeDiff(request);
-
-        assertNotNull(response);
-        assertEquals("cached title", response.title());
-        assertEquals("req-1", response.requestId());
-        verify(aiChatService, never()).callAiModel(any(), any(), any());
-        verify(analysisMetrics).countCacheHit("openai");
-    }
-
-        @Test
-    void analyzeDiff_shouldThrow429_whenProviderBulkheadFull() {        doThrow(io.github.resilience4j.bulkhead.BulkheadFullException.createBulkheadFullException(
-                        io.github.resilience4j.bulkhead.Bulkhead.ofDefaults("test")))
-                .when(bulkhead).executeSupplier(any());
-
-        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
-                                                        .diff("diff")
-                                                        .requestId("req-1")
-                                                        .build();
-
-        CustomApiException exception = assertThrows(
-                CustomApiException.class,
-                () -> diffAnalysisService.analyzeDiff(request)
-        );
-
-        assertEquals(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS, exception.getHttpStatus());
-    }
-
-    @Test
-    void analyzeDiff_shouldRethrowBlockedDiff_withoutFallback() {
-        when(aiChatService.callAiModel(any(), any(), any()))
-                .thenThrow(new io.github.kxng0109.aiprcopilot.error.BlockedDiffException("Blocked: test"));
-
-        AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
-                                                        .diff("diff")
-                                                        .requestId("req-1")
-                                                        .build();
-
-        assertThrows(io.github.kxng0109.aiprcopilot.error.BlockedDiffException.class,
-                     () -> diffAnalysisService.analyzeDiff(request));
-        verify(aiChatService, times(1)).callAiModel(any(), any(), any());
-    }
-
-    private ChatResponse mockChatResponse() {
-        Generation generation = new Generation(
-                new AssistantMessage("Some details or message")
-        );
-
-        Usage usage = new DefaultUsage(0, 0, 120);
-
-        ChatResponseMetadata chatResponseMetadata = ChatResponseMetadata.builder()
-                                                                        .model("gpt-4o")
-                                                                        .usage(usage)
-                                                                        .build();
-
-        return ChatResponse.builder()
-                           .generations(List.of(generation))
-                           .metadata(chatResponseMetadata)
-                           .build();
-    }
+	@Mock
+	private PrCopilotAnalysisProperties analysisProperties;
+
+	@Mock
+	private MultiAiConfigurationProperties multiAiConfigurationProperties;
+
+	@Mock
+	private PrCopilotLoggingProperties loggingProperties;
+
+	@Mock
+	private ChatClient primaryChatClient;
+
+	@Mock
+	private ChatOptions.Builder primaryChatOptions;
+
+	@Mock
+	private PromptBuilderService promptBuilderService;
+
+	@Mock
+	private AiChatService aiChatService;
+
+	@Mock
+	private DiffResponseMapperService diffResponseMapperService;
+
+	@Mock
+	private io.github.resilience4j.bulkhead.BulkheadRegistry bulkheadRegistry;
+
+	@Mock
+	private io.github.resilience4j.bulkhead.Bulkhead bulkhead;
+
+	@Mock
+	private com.github.benmanes.caffeine.cache.Cache<String, AnalyzeDiffResponse> analysisCache;
+
+	@Mock
+	private AnalysisMetrics analysisMetrics;
+
+	@InjectMocks
+	private DiffAnalysisService diffAnalysisService;
+
+	@BeforeEach
+	@SuppressWarnings("unchecked")
+	public void setup() {
+		lenient().when(analysisProperties.getDefaultLanguage()).thenReturn("en");
+		lenient().when(analysisProperties.getMaxDiffChars()).thenReturn(50000);
+		lenient().when(analysisProperties.isIncludeRawModelOutput()).thenReturn(false);
+		lenient().when(analysisProperties.getDefaultStyle()).thenReturn("conventional-commits");
+
+		lenient().when(multiAiConfigurationProperties.getProvider()).thenReturn(AiProvider.OPENAI);
+		lenient().when(multiAiConfigurationProperties.isAutoFallback()).thenReturn(false);
+		lenient().when(multiAiConfigurationProperties.getTemperature()).thenReturn(0.1);
+		lenient().when(multiAiConfigurationProperties.getMaxTokens()).thenReturn(1024);
+		lenient().when(promptBuilderService.templateHash()).thenReturn("testhash");
+		lenient().when(bulkheadRegistry.bulkhead(anyString())).thenReturn(bulkhead);
+		lenient().doAnswer(i -> ((java.util.function.Supplier<?>) i.getArgument(0)).get())
+		         .when(bulkhead).executeSupplier(any());
+
+		diffAnalysisService = new DiffAnalysisService(
+				analysisProperties,
+				primaryChatClient,
+				primaryChatOptions,
+				loggingProperties,
+				multiAiConfigurationProperties,
+				promptBuilderService,
+				aiChatService,
+				diffResponseMapperService,
+				bulkheadRegistry,
+				analysisCache,
+				analysisMetrics,
+				null,
+				null
+		);
+	}
+
+	@Test
+	public void analyzeDiff_shouldUseDefaults_whenLanguageAndStyleAreNull() {
+		String diff = "a diff sha";
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff(diff)
+		                                               .requestId("req-1")
+		                                               .build();
+
+		Prompt mockPrompt = mock(Prompt.class);
+		when(promptBuilderService.buildDiffAnalysisPrompt(
+				eq("en"),
+				eq("conventional-commits"),
+				eq(diff),
+				isNull(),
+				eq("req-1")
+		)).thenReturn(mockPrompt);
+
+		ChatResponse mockChatResponse = mockChatResponse();
+		when(aiChatService.callAiModel(
+				mockPrompt,
+				primaryChatClient,
+				primaryChatOptions
+		)).thenReturn(mockChatResponse);
+
+		AnalyzeDiffResponse expectedResponse = AnalyzeDiffResponse.builder()
+		                                                          .title("test title")
+		                                                          .summary("test summary")
+		                                                          .requestId("req-1")
+		                                                          .build();
+
+		when(diffResponseMapperService.mapToAnalyzeDiffResponse(
+				eq(mockChatResponse),
+				anyLong(),
+				eq(diff),
+				eq("req-1"),
+				eq("openai")
+		)).thenReturn(expectedResponse);
+
+		AnalyzeDiffResponse response = diffAnalysisService.analyzeDiff(request);
+
+		assertNotNull(response);
+		assertEquals(expectedResponse.title(), response.title());
+		assertEquals(expectedResponse.summary(), response.summary());
+		assertEquals(expectedResponse.requestId(), response.requestId());
+
+		verify(promptBuilderService).buildDiffAnalysisPrompt(
+				"en",
+				"conventional-commits",
+				diff,
+				null,
+				"req-1"
+		);
+		verify(aiChatService).callAiModel(mockPrompt, primaryChatClient, primaryChatOptions);
+		verify(diffResponseMapperService).mapToAnalyzeDiffResponse(
+				eq(mockChatResponse),
+				anyLong(),
+				eq(diff),
+				eq("req-1"),
+				eq("openai")
+		);
+	}
+
+	@Test
+	void analyzeDiff_shouldUseProvidedLanguageAndStyle_whenSpecified() {
+		String diff = "diff content";
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff(diff)
+		                                               .language("fr")
+		                                               .style("gitlab")
+		                                               .maxSummaryLength(200)
+		                                               .requestId("req-2")
+		                                               .build();
+
+		Prompt mockPrompt = mock(Prompt.class);
+		when(promptBuilderService.buildDiffAnalysisPrompt(
+				eq("fr"),
+				eq("gitlab"),
+				eq(diff),
+				eq(200),
+				eq("req-2")
+		)).thenReturn(mockPrompt);
+
+		ChatResponse mockChatResponse = mockChatResponse();
+		when(aiChatService.callAiModel(mockPrompt, primaryChatClient, primaryChatOptions))
+				.thenReturn(mockChatResponse);
+
+		AnalyzeDiffResponse expectedResponse = AnalyzeDiffResponse.builder()
+		                                                          .title("titre de test")
+		                                                          .build();
+
+		when(diffResponseMapperService.mapToAnalyzeDiffResponse(
+				any(), anyLong(), any(), any(), any()
+		)).thenReturn(expectedResponse);
+
+		AnalyzeDiffResponse response = diffAnalysisService.analyzeDiff(request);
+
+		assertNotNull(response);
+		verify(promptBuilderService).buildDiffAnalysisPrompt("fr", "gitlab", diff, 200, "req-2");
+	}
+
+
+	@Test
+	public void analyzeDiff_shouldThrowDoffTooLargeException_whenDiffExceedsMaxChars() {
+		String largeDiff = "x".repeat(analysisProperties.getMaxDiffChars() + 1);
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff(largeDiff)
+		                                               .requestId("req-1")
+		                                               .build();
+
+		assertThrows(DiffTooLargeException.class, () -> diffAnalysisService.analyzeDiff(request));
+
+		verify(promptBuilderService, never()).buildDiffAnalysisPrompt(any(), any(), any(), any(), any());
+		verify(aiChatService, never()).callAiModel(any(), any(), any());
+		verify(diffResponseMapperService, never()).mapToAnalyzeDiffResponse(any(), anyLong(), any(), any(), any());
+	}
+
+	@Test
+	void analyzeDiff_shouldRethrowModelOutputParseException_whenParsingFails() {
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		Prompt mockPrompt = mock(Prompt.class);
+		when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
+				.thenReturn(mockPrompt);
+
+		when(aiChatService.callAiModel(any(), any(), any()))
+				.thenReturn(mockChatResponse());
+
+		when(diffResponseMapperService.mapToAnalyzeDiffResponse(any(), anyLong(), any(), any(), any()))
+				.thenThrow(new ModelOutputParseException("Invalid JSON"));
+
+		ModelOutputParseException exception = assertThrows(
+				ModelOutputParseException.class,
+				() -> diffAnalysisService.analyzeDiff(request)
+		);
+
+		assertEquals("Invalid JSON", exception.getMessage());
+	}
+
+	@Test
+	void analyzeDiff_shouldUseFallback_whenPrimaryFailsAndAutoFallbackEnabled() {
+		when(multiAiConfigurationProperties.isAutoFallback()).thenReturn(true);
+		when(multiAiConfigurationProperties.getFallbackProvider()).thenReturn(AiProvider.ANTHROPIC);
+
+		ChatClient fallbackChatClient = mock(ChatClient.class);
+		ChatOptions.Builder fallbackChatOptions = mock(ChatOptions.Builder.class);
+
+		diffAnalysisService = new DiffAnalysisService(
+				analysisProperties,
+				primaryChatClient,
+				primaryChatOptions,
+				loggingProperties,
+				multiAiConfigurationProperties,
+				promptBuilderService,
+				aiChatService,
+				diffResponseMapperService,
+				bulkheadRegistry,
+				analysisCache,
+				analysisMetrics,
+				fallbackChatClient,
+				fallbackChatOptions
+		);
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		Prompt mockPrompt = mock(Prompt.class);
+		when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
+				.thenReturn(mockPrompt);
+
+		when(aiChatService.callAiModel(mockPrompt, primaryChatClient, primaryChatOptions))
+				.thenThrow(new RuntimeException("Primary failed"));
+
+		ChatResponse fallbackResponse = mockChatResponse();
+		when(aiChatService.callAiModel(mockPrompt, fallbackChatClient, fallbackChatOptions))
+				.thenReturn(fallbackResponse);
+
+		AnalyzeDiffResponse expectedResponse = AnalyzeDiffResponse.builder()
+		                                                          .title("fallback response")
+		                                                          .build();
+
+		when(diffResponseMapperService.mapToAnalyzeDiffResponse(
+				eq(fallbackResponse), anyLong(), any(), any(), eq("anthropic")
+		)).thenReturn(expectedResponse);
+
+		AnalyzeDiffResponse response = diffAnalysisService.analyzeDiff(request);
+
+		assertNotNull(response);
+		assertEquals("fallback response", response.title());
+
+		verify(aiChatService).callAiModel(mockPrompt, primaryChatClient, primaryChatOptions);
+		verify(aiChatService).callAiModel(mockPrompt, fallbackChatClient, fallbackChatOptions);
+	}
+
+	@Test
+	void analyzeDiff_shouldThrowException_whenBothPrimaryAndFallbackFail() {
+		when(multiAiConfigurationProperties.isAutoFallback()).thenReturn(true);
+		when(multiAiConfigurationProperties.getFallbackProvider()).thenReturn(AiProvider.ANTHROPIC);
+
+		ChatClient fallbackChatClient = mock(ChatClient.class);
+		ChatOptions.Builder fallbackChatOptions = mock(ChatOptions.Builder.class);
+
+		diffAnalysisService = new DiffAnalysisService(
+				analysisProperties,
+				primaryChatClient,
+				primaryChatOptions,
+				loggingProperties,
+				multiAiConfigurationProperties,
+				promptBuilderService,
+				aiChatService,
+				diffResponseMapperService,
+				bulkheadRegistry,
+				analysisCache,
+				analysisMetrics,
+				fallbackChatClient,
+				fallbackChatOptions
+		);
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		Prompt mockPrompt = mock(Prompt.class);
+		when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
+				.thenReturn(mockPrompt);
+
+		when(aiChatService.callAiModel(mockPrompt, primaryChatClient, primaryChatOptions))
+				.thenThrow(new RuntimeException("Primary failed"));
+
+		when(aiChatService.callAiModel(mockPrompt, fallbackChatClient, fallbackChatOptions))
+				.thenThrow(new RuntimeException("Fallback also failed"));
+
+		RuntimeException exception = assertThrows(
+				RuntimeException.class,
+				() -> diffAnalysisService.analyzeDiff(request)
+		);
+
+		assertThat(exception.getMessage()).contains("Primary failed");
+		assertThat(exception.getMessage()).contains("Fallback also failed");
+	}
+
+	@Test
+	void analyzeDiff_shouldLogPrompt_whenLoggingEnabled() {
+		when(loggingProperties.isLogPrompts()).thenReturn(true);
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		Prompt mockPrompt = mock(Prompt.class);
+		when(mockPrompt.toString()).thenReturn("Mock Prompt Content");
+		when(promptBuilderService.buildDiffAnalysisPrompt(any(), any(), any(), any(), any()))
+				.thenReturn(mockPrompt);
+
+		when(aiChatService.callAiModel(any(), any(), any()))
+				.thenReturn(mockChatResponse());
+
+		when(diffResponseMapperService.mapToAnalyzeDiffResponse(any(), anyLong(), any(), any(), any()))
+				.thenReturn(AnalyzeDiffResponse.builder().title("test").build());
+
+		diffAnalysisService.analyzeDiff(request);
+
+		verify(loggingProperties).isLogPrompts();
+	}
+
+	@Test
+	void analyzeDiff_shouldReturnCachedResponse_whenDiffHashSeenBefore() {
+		when(analysisProperties.getCacheMaxSize()).thenReturn(1000);
+		AnalyzeDiffResponse cached = AnalyzeDiffResponse.builder()
+		                                                .title("cached title")
+		                                                .requestId("old-req")
+		                                                .build();
+		when(analysisCache.getIfPresent(anyString())).thenReturn(cached);
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		AnalyzeDiffResponse response = diffAnalysisService.analyzeDiff(request);
+
+		assertNotNull(response);
+		assertEquals("cached title", response.title());
+		assertEquals("req-1", response.requestId());
+		verify(aiChatService, never()).callAiModel(any(), any(), any());
+		verify(analysisMetrics).countCacheHit("openai");
+	}
+
+	@Test
+	void analyzeDiff_shouldThrow429_whenProviderBulkheadFull() {
+		doThrow(io.github.resilience4j.bulkhead.BulkheadFullException.createBulkheadFullException(
+				io.github.resilience4j.bulkhead.Bulkhead.ofDefaults("test")))
+				.when(bulkhead).executeSupplier(any());
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		CustomApiException exception = assertThrows(
+				CustomApiException.class,
+				() -> diffAnalysisService.analyzeDiff(request)
+		);
+
+		assertEquals(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS, exception.getHttpStatus());
+	}
+
+	@Test
+	void analyzeDiff_shouldRethrowBlockedDiff_withoutFallback() {
+		when(aiChatService.callAiModel(any(), any(), any()))
+				.thenThrow(new io.github.kxng0109.aiprcopilot.error.BlockedDiffException("Blocked: test"));
+
+		AnalyzeDiffRequest request = AnalyzeDiffRequest.builder()
+		                                               .diff("diff")
+		                                               .requestId("req-1")
+		                                               .build();
+
+		assertThrows(
+				io.github.kxng0109.aiprcopilot.error.BlockedDiffException.class,
+				() -> diffAnalysisService.analyzeDiff(request)
+		);
+		verify(aiChatService, times(1)).callAiModel(any(), any(), any());
+	}
+
+	private ChatResponse mockChatResponse() {
+		Generation generation = new Generation(
+				new AssistantMessage("Some details or message")
+		);
+
+		Usage usage = new DefaultUsage(0, 0, 120);
+
+		ChatResponseMetadata chatResponseMetadata = ChatResponseMetadata.builder()
+		                                                                .model("gpt-4o")
+		                                                                .usage(usage)
+		                                                                .build();
+
+		return ChatResponse.builder()
+		                   .generations(List.of(generation))
+		                   .metadata(chatResponseMetadata)
+		                   .build();
+	}
 }

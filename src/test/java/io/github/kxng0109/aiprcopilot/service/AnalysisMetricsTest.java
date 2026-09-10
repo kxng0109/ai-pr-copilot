@@ -9,33 +9,33 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class AnalysisMetricsTest {
 
-    private SimpleMeterRegistry registry;
-    private AnalysisMetrics metrics;
+	private SimpleMeterRegistry registry;
+	private AnalysisMetrics metrics;
 
-    @BeforeEach
-    void setup() {
-        registry = new SimpleMeterRegistry();
-        metrics = new AnalysisMetrics(registry);
-    }
+	@BeforeEach
+	void setup() {
+		registry = new SimpleMeterRegistry();
+		metrics = new AnalysisMetrics(registry);
+	}
 
-    @Test
-    void counters_shouldIncrement() {
-        metrics.countCacheHit("openai");
-        metrics.countCacheHit("openai");
-        metrics.countCacheMiss("openai");
+	@Test
+	void counters_shouldIncrement() {
+		metrics.countCacheHit("openai");
+		metrics.countCacheHit("openai");
+		metrics.countCacheMiss("openai");
 
-        assertThat(registry.counter("aiprcopilot.analysis.cache", "result", "hit", "provider", "openai").count())
-                .isEqualTo(2.0);
-        assertThat(registry.counter("aiprcopilot.analysis.cache", "result", "miss", "provider", "openai").count())
-                .isEqualTo(1.0);
-    }
+		assertThat(registry.counter("aiprcopilot.analysis.cache", "result", "hit", "provider", "openai").count())
+				.isEqualTo(2.0);
+		assertThat(registry.counter("aiprcopilot.analysis.cache", "result", "miss", "provider", "openai").count())
+				.isEqualTo(1.0);
+	}
 
-    @Test
-    void sample_shouldRecordLatency() {
-        Timer.Sample sample = metrics.startSample();
-        metrics.stopSample(sample, "ollama", "success");
+	@Test
+	void sample_shouldRecordLatency() {
+		Timer.Sample sample = metrics.startSample();
+		metrics.stopSample(sample, "ollama", "success");
 
-        Timer timer = registry.timer("aiprcopilot.analysis.duration", "provider", "ollama", "outcome", "success");
-        assertThat(timer.count()).isEqualTo(1);
-    }
+		Timer timer = registry.timer("aiprcopilot.analysis.duration", "provider", "ollama", "outcome", "success");
+		assertThat(timer.count()).isEqualTo(1);
+	}
 }

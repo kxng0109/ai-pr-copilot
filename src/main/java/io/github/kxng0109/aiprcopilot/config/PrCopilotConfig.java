@@ -5,11 +5,11 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 @EnableConfigurationProperties({
-        PrCopilotAnalysisProperties.class,
-        PrCopilotLoggingProperties.class,
-        MultiAiConfigurationProperties.class,
-        PrCopilotAuthProperties.class,
-        PrCopilotSarifProperties.class
+		PrCopilotAnalysisProperties.class,
+		PrCopilotLoggingProperties.class,
+		MultiAiConfigurationProperties.class,
+		PrCopilotAuthProperties.class,
+		PrCopilotSarifProperties.class
 })
 public class PrCopilotConfig {
 }
