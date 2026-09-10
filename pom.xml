@@ -10,12 +10,17 @@
     </parent>
     <groupId>io.github.kxng0109</groupId>
     <artifactId>ai-pr-copilot</artifactId>
-    <version>1.0.0-rc.9</version>
+    <version>1.0.0-rc.10</version>
     <name>AI PR Copilot</name>
     <description>AI PR Copilot</description>
     <properties>
         <java.version>25</java.version>
         <spring-ai.version>2.0.1</spring-ai.version>
+        <!-- Spring Boot 4.1.1 BOM manages tomcat-embed-core at 11.0.24,
+             which carries CVE-2026-65182 (security constraint bypass),
+             CVE-2026-65905 and CVE-2026-68525 (auth bypasses). 11.0.25
+             fixes all three and is the newest 11.0.x release. -->
+        <tomcat.version>11.0.25</tomcat.version>
     </properties>
     <dependencies>
         <dependency>
