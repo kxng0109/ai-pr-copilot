@@ -52,4 +52,6 @@ jobs:
         uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v4
         with:
           path: ${{ github.workspace }}/.cache/trivy
-          key: cache-trivy-${{ steps.date.outputs.date }}
+          # Include the run id so concurrent runs (e.g. the warm job and a
+          # release triggered by the same push) never contend for one key.
+          key: cache-trivy-${{ steps.date.outputs.date }}-${{ github.run_id }}
