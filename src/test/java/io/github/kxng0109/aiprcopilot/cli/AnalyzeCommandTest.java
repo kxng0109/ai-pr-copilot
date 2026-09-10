@@ -261,7 +261,7 @@ public class AnalyzeCommandTest {
 		int exitCode = commandLine.execute("--version");
 
 		assertEquals(0, exitCode);
-		assertTrue(stdout.toString().contains("ai-pr-copilot 1.0.0"));
+		assertTrue(stdout.toString().contains("ai-pr-copilot 1.1.0"));
 	}
 
 	@Test

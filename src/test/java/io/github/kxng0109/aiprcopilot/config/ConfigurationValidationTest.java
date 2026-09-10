@@ -30,14 +30,10 @@ class ConfigurationValidationTest {
 		tokens.setMaxTokens(0);
 		assertThat(VALIDATOR.validate(tokens)).isNotEmpty();
 
-		MultiAiConfigurationProperties timeout = validMultiAi();
-		timeout.setTimeoutMillis(999);
-		assertThat(VALIDATOR.validate(timeout)).isNotEmpty();
-
-		MultiAiConfigurationProperties bulkhead = validMultiAi();
-		bulkhead.setBulkheadSaasMaxConcurrent(0);
-		assertThat(VALIDATOR.validate(bulkhead)).isNotEmpty();
-	}
+        MultiAiConfigurationProperties timeout = validMultiAi();
+        timeout.setTimeoutMillis(999);
+        assertThat(VALIDATOR.validate(timeout)).isNotEmpty();
+    }
 
 	@Test
 	void analysis_shouldAcceptBoundaryValues() {
@@ -74,12 +70,9 @@ class ConfigurationValidationTest {
 		properties.setProvider(AiProvider.OPENAI);
 		properties.setTemperature(0.1);
 		properties.setMaxTokens(1024);
-		properties.setTimeoutMillis(30000);
-		properties.setBulkheadSaasMaxConcurrent(15);
-		properties.setBulkheadOllamaMaxConcurrent(3);
-		properties.setBulkheadMaxWaitMillis(0);
-		return properties;
-	}
+        properties.setTimeoutMillis(30000);
+        return properties;
+    }
 
 	private static PrCopilotAnalysisProperties validAnalysis() {
 		PrCopilotAnalysisProperties properties = new PrCopilotAnalysisProperties();

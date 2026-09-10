@@ -42,13 +42,4 @@ public class MultiAiConfigurationProperties {
 	 * warning but never fails startup, so transient network blips cannot take the service down.
 	 */
 	private boolean healthCheckPing = false;
-
-	@Min(value = 1, message = "SaaS bulkhead concurrency must be at least 1")
-	private int bulkheadSaasMaxConcurrent = 15;
-
-	@Min(value = 1, message = "Ollama bulkhead concurrency must be at least 1")
-	private int bulkheadOllamaMaxConcurrent = 3;
-
-	@Min(value = 0, message = "Bulkhead max wait must not be negative")
-	private long bulkheadMaxWaitMillis = 0;
 }

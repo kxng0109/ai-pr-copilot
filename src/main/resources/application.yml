@@ -64,10 +64,8 @@ prcopilot:
     timeout-millis: ${AI_TIMEOUT_MILLIS:30000}
     # Opt-in startup reachability ping of provider base URLs (warn-only, never fails startup)
     health-check-ping: ${PRCOPILOT_AI_HEALTH_CHECK_PING:false}
-    # Concurrency bulkheads (fail-fast 429 when full)
-    bulkhead-saas-max-concurrent: ${PRCOPILOT_AI_BULKHEAD_SAAS_MAX_CONCURRENT:15}
-    bulkhead-ollama-max-concurrent: ${PRCOPILOT_AI_BULKHEAD_OLLAMA_MAX_CONCURRENT:3}
-    bulkhead-max-wait-millis: ${PRCOPILOT_AI_BULKHEAD_MAX_WAIT_MILLIS:0}
+    # Concurrency bulkheads are configured exclusively via the resilience4j.bulkhead
+    # block below (startup-validated); no duplicates here.
     # API rate limiting is configured exclusively via the resilience4j.ratelimiter
     # block below (Duration-typed, startup-validated); no duplicates here.
 
