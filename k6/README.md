@@ -52,12 +52,54 @@ k6 run --env=ENV=staging --env=BASE_URL=https://staging.example.com \
             --env=API_KEY="$STAGING_KEY" k6/load.js
 ```
 
-## Before you trust these numbers
+## Calibrating the thresholds
 
-1. Run `smoke` alone against a warm service and record the real p50.
-2. Run `load` for 5 minutes and confirm p95/p99 against the proposed
-   thresholds; widen or tighten as your infrastructure dictates.
-3. Run `stress` and confirm bulkhead rejections rise predictably and
-   `http_req_failed` stays below the floor.
-4. Delete or adjust any threshold you cannot meet — a threshold that
-   always passes is decoration, not a guardrail.
+The numbers above are a starting point. Calibrate them once, then treat
+them as targets. Do not run this while another load generator is active
+on the same host — you will measure the other tool, not this service.
+
+### Step 1 — smoke (warm service, ~1 min)
+
+```bash
+k6 run --env=BASE_URL=http://localhost:8080 --env=API_KEY=change-me \
+  --scenarios smoke=1 k6/load.js
+```
+
+Record the real p50, p95, p99 and SSE `http_req_waiting` p50. If the
+warm p95 is already above the proposed `http_req_duration` p95 threshold,
+the threshold is wrong for this hardware — widen it before proceeding.
+
+### Step 2 — load (5 minutes at average traffic)
+
+```bash
+k6 run --env=BASE_URL=http://localhost:8080 --env=API_KEY=change-me \
+  --scenarios load=1 k6/load.js
+```
+
+Confirm p95/p99 against the proposed thresholds. Widen or tighten, and
+record the final numbers below.
+
+### Step 3 — stress (observe bulkhead / 429 behaviour)
+
+```bash
+k6 run --env=BASE_URL=http://localhost:8080 --env=API_KEY=change-me \
+  --scenarios stress=1 k6/load.js
+```
+
+Confirm bulkhead rejections rise predictably as the rate exceeds capacity,
+and `http_req_failed` stays below the floor. If 429s dominate, the rate
+limiter is the bottleneck — raise the limiter or lower the stress target.
+
+### Record your calibrated baseline
+
+| Metric | Proposed | Calibrated | Date |
+|---|---|---|---|
+| `http_req_duration` p95 | < 3 s | | |
+| `http_req_duration` p99 | < 8 s | | |
+| `http_req_waiting` p95 (SSE) | < 1.5 s | | |
+| `http_req_failed` rate | < 0.05 | | |
+| `checks` rate | > 0.99 | | |
+
+A threshold that always passes is decoration, not a guardrail. Delete or
+adjust any you cannot meet, and commit the calibrated row with the
+measurement date.
